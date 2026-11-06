@@ -99,8 +99,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
-            Read first: .claude/skills/deslop/SKILL.md, your operating
-            manual.
+            Read first: .claude/skills/deslop/SKILL.md.
 
             Your territory is src/, plus the research/JOURNAL.md clause
             the skill's step 4 asks for: it rides in the deleting PR,
@@ -121,25 +120,26 @@ jobs:
                number,title,createdAt`, oldest first; `gh pr list --limit 100
                --json number,closingIssuesReferences` says which are
                taken, GitHub's own parse, not a word search (#1428);
-               one outside src/ stays the maintainer's. A scope already
-               found and stated is a hunt already paid for: take it on
-               a new branch claude/deslop-<slug>, `Closes #N` in the PR
-               body. One whose finding no longer holds on main is
-               closed with the reason (`gh-comment <N> --close`); a
-               close is not the unit, move to the next.
-            3. Otherwise hunt. Pick one scope per the Scope section of
-               the skill, state it in one sentence, and execute the
-               skill's procedure on a new branch claude/deslop-<slug>.
+               one outside src/ stays the maintainer's. A stated scope
+               is a hunt already paid for: take it on a new branch
+               claude/deslop-<slug>, `Closes #N` in the PR body. One
+               whose finding no longer holds on main is closed with the
+               reason (`gh-comment <N> --close`); a close is not the
+               unit, move to the next.
+            3. Otherwise hunt: one scope per the skill's Scope section,
+               stated in one sentence, the skill's procedure on a new
+               branch claude/deslop-<slug>.
 
-            The PR body is your only report. State: the scope in one
-            sentence and why that scope; each defect removed and which
-            taxonomy rule it violated; how behaviour preservation was
-            proved, naming the commands you ran; the number of the issue
-            you filed for any second scope you found (`gh-comment --new`,
-            label product), never the scope as a sentence, because a
-            body is not a queue. No severity ratings, no status
-            headers. CHANGELOG.md only for a user-visible change, which
-            most desloppings are not.
+            The PR body is the report. State: the scope in one sentence
+            and why that scope; each defect removed and which taxonomy
+            rule it violated; how behaviour preservation was proved,
+            naming the commands you ran; the number of the issue you
+            filed for any second scope you found (`gh-comment --new`,
+            label product), never as a sentence: a body is not a queue.
+            No severity ratings, no status headers. CHANGELOG.md only
+            for a user-visible change. Your final response is a status
+            post (Voice S1): first sentence the PR opened, or that
+            nothing shipped.
           # Bash unrestricted, and `--tools` the set this seat's sessions
           # call, per agents/GOVERNANCE.md "Tool envelopes": Bash, Read,
           # Edit and Write across 101 runs to 2026-10-25, Skill never.
