@@ -198,21 +198,22 @@ jobs:
           path: mutants.out/
           if-no-files-found: ignore
 
-  # Every `exclude_re` in tests/mutants.toml still matches a mutant, or this
-  # is red. A line-pinned entry dies when the lines above it move, the
-  # mutants it proved equivalent or non-terminating go live, and the next
-  # sweep spends a whole timeout on each hang. Four hand repins in three
-  # weeks (#699, #880, #999, #1172), the last two after deslop passes on
-  # coder.rs whose contract is no behaviour change, which a doc-only cut
-  # keeps while moving every line below it; no review catches that, so a
-  # reader had to be built (#702). Its own job, so its red says "repin" and
-  # the mutants job's red keeps saying "missed": the two are different
-  # work for whoever reads the thread. Red and not a warning because a
-  # warning on a merged PR has no reader, the lesson mutants-debt above
-  # already paid for. `--list` parses the crate without building it, 0.35 s
-  # for 2,196 mutants on 2026-10-14, so the job is a checkout and the
-  # cached binary; it has no path filter of its own because the workflow's
-  # already names tests/mutants.toml, which makes a repin PR verify itself.
+  # Red when tests/mutants.toml drifts from what its proofs claim, two
+  # checks: an `exclude_re` that matches no mutant (the mutants it proved
+  # equivalent or non-terminating are live again, and the next sweep
+  # spends a whole timeout on each hang), and a block whose matches differ
+  # from its `# mutants: N` line (an over-match hides a real mutant). The
+  # script's docstring carries the history: four hand repins before a
+  # reader existed (#702), then the pin-by-column trade (#1813) that
+  # dropped the line from the pins and made the count necessary. Its own
+  # job, so its red says "rescope" and the mutants job's red keeps saying
+  # "missed": the two are different work for whoever reads the thread.
+  # Red and not a warning because a warning on a merged PR has no reader,
+  # the lesson mutants-debt above already paid for. `--list` parses the
+  # crate without building it, 0.35 s for 2,196 mutants on 2026-10-14, so
+  # the job is a checkout and the cached binary; it has no path filter of
+  # its own because the workflow's already names tests/mutants.toml, which
+  # makes an exclusions PR verify itself.
   exclusions:
     runs-on: ubuntu-24.04
     permissions:
