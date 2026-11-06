@@ -2916,7 +2916,9 @@ record.
   trial beside the wide one, accepted; full record in S2-A146's own entry.
   Twenty-eighth slice, S2-A147: `baseline_gate measure` and `delta` read
   a level and a case length, the driver S2-A137's unmeasured far reach at
-  `-2` needs; full record in S2-A147's own entry.
+  `-2` needs; full record in S2-A147's own entry. Twenty-ninth slice,
+  S2-A148: `delta` refuses a file lacking a measured case, accepted; full
+  record in S2-A148's own entry.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -10033,3 +10035,25 @@ record.
   so both deltas are null. | **Not measured:** the far reach at `-2`
   itself, and the 4,000,000-byte sealed read's time.
   `research/progress.jsonl` it254.
+- S2-A148 | ACCEPTED | Lead S1-P4, a guard on S2-A147's keeper read
+  (issue #1892). Hypothesis: `baseline_gate delta` exiting 1 when the
+  file lacks a case the probe measured stops a sealed read of a train
+  file from printing `sealed mean +0.000000 over 0 cases` and exiting 0,
+  a null delta a research loop would read as "no move". | Mechanism:
+  `deltas` pairs only names on both sides and `mean_delta` of none is
+  `0.0`, so a case-set mismatch printed a mean over a subset or over
+  nothing. The mean's denominator is now every measured case or there is
+  no mean; a case only the file holds is still skipped, so
+  `bench/baseline.json`, which adds the reach cases, still reads. A
+  mismatched `--level` or `--len` keeps the case names and stays
+  undetected, because the file records no options; recording them
+  changes `bench/baseline.json`'s format and is its own decision. |
+  Measured, release build, AMD EPYC 9V74 4 logical cores runner, main at
+  `8c274d4` against the branch: the issue's repro, `measure --len 20000`
+  then `delta` of it with `--sealed --len 20000`, exits 1 naming both
+  sealed cases missing; `delta` of it with `--len 20000` and `delta
+  bench/baseline.json` each print the train mean over 11 cases, exit 0.
+  | Verdict: **accepted**, a capability patch with no comparable
+  benchmark, so both deltas are null. | **Not measured:** the far reach
+  at `-2` itself, still S2-A147's open measurement.
+  `research/progress.jsonl` it255.
