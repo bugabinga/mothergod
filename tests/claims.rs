@@ -1110,6 +1110,52 @@ fn per_level_figures_match_their_generated_report() {
     );
 }
 
+/// README and site's `-4` sentence quotes its Silesia frontier row's ratio,
+/// encode and decode rates, and `-3`'s decode rate beside them, because
+/// decode is the price a reader weighs `-4` by (issue #1880).
+#[test]
+fn extreme_level_figures_match_their_generated_report() {
+    let source = "docs/benchmarks/silesia.md";
+    let three = frontier_numbers("silesia.md", "**mothergod**");
+    let units = ["bits/byte", "MB/s"];
+    let four = frontier_numbers("silesia.md", "**mothergod -4**");
+    let truth: Vec<String> = [four[0], four[1], four[2], three[2]]
+        .map(three_decimals)
+        .to_vec();
+    let name = |index: usize| {
+        [
+            "Silesia -4 bits/byte",
+            "Silesia -4 encode MB/s",
+            "Silesia -4 decode MB/s",
+            "Silesia -3 decode MB/s",
+        ][index]
+            .to_owned()
+    };
+    check_figures(
+        "README.md",
+        source,
+        |text| {
+            unit_number_spans(
+                text,
+                sentence_after(text, "On Silesia, `-4` writes"),
+                &units,
+            )
+        },
+        &truth,
+        name,
+    );
+    check_figures(
+        "site/index.html",
+        source,
+        |text| {
+            let region = sentence_after(text, "Silesia, <code>-4</code> writes");
+            unit_number_spans(text, region, &units)
+        },
+        &truth,
+        name,
+    );
+}
+
 /// README and site anchor "slow" against `xz -9e` on Silesia: they quote its
 /// rates from the same run and call it "more than nine times faster to
 /// encode and more than twenty times faster to decode". The rates are

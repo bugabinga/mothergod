@@ -447,8 +447,9 @@ cmp FILE FILE.out</pre>
           and faster: the levels shorten the wait, they do not make mothergod
           fast. <code>-4</code> goes the other way: it also codes every byte
           through one context-mixing model and keeps that file where it is
-          smaller, at a cost in encode time and far more in decode time, not yet
-          measured on Silesia. Every level writes frames the one decoder reads.
+          smaller. On Silesia, <code>-4</code> writes 1.736 bits/byte at 0.043
+          MB/s and reads it back at 0.163 MB/s, against <code>-3</code>'s 2.363
+          MB/s. Every level writes frames the one decoder reads.
           <code>--version</code> also prints the format version the build reads;
           put it in a bug report.
         </p>
