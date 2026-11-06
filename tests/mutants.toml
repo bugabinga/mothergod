@@ -151,7 +151,7 @@ exclude_re = [
   #           true. Pinned: the function's other `==` (col 44)
   #           is caught by the Interrupted tests.
   #   read_frame -> Ok(true): the body never loads a frame, so `read`'s
-  #           `while self.pos == self.end` never leaves. Exact
+  #           `while self.pos == self.out.len()` never leaves. Exact
   #           text: the `Ok(false)` twin is caught.
   # Both timed out at 60s on the `read::` tests alone.
   # mutants: 2
