@@ -129,19 +129,6 @@ fn main() -> ExitCode {
     }
 }
 
-/// The encoder level a digit option names: `-1` is the fastest, `-3` the
-/// default, `-4` the smallest. The only digits there are, because an accepted digit
-/// that chose nothing is what `tests/fit/cli.txt`'s `level-digit` declined on.
-fn level_digit(digit: char) -> Option<Level> {
-    match digit {
-        '1' => Some(Level::Fastest),
-        '2' => Some(Level::Fast),
-        '3' => Some(Level::Best),
-        '4' => Some(Level::Extreme),
-        _ => None,
-    }
-}
-
 /// Reads the genre's grammar: option clusters (`-dc`), long options, `--` to
 /// end options, and `-` as an operand naming stdin. `-h` and `-V` answer at
 /// once, wherever they stand. `-k` is accepted and changes nothing: the
@@ -194,14 +181,17 @@ fn parse(args: impl Iterator<Item = OsString>) -> Result<Request, String> {
                 'q' => verbose = false,
                 'h' => return Ok(Request::Help),
                 'V' => return Ok(Request::Version),
-                digit if digit.is_ascii_digit() => match level_digit(digit) {
-                    Some(named) => level = Some(named),
-                    None => {
-                        return Err(format!(
-                            "unknown option \"-{digit}\": the levels are -1 to -4"
-                        ));
-                    }
-                },
+                // The only digits there are: an accepted digit that chose
+                // nothing is what `tests/fit/cli.txt`'s `level-digit` declined on.
+                '1' => level = Some(Level::Fastest),
+                '2' => level = Some(Level::Fast),
+                '3' => level = Some(Level::Best),
+                '4' => level = Some(Level::Extreme),
+                digit if digit.is_ascii_digit() => {
+                    return Err(format!(
+                        "unknown option \"-{digit}\": the levels are -1 to -4"
+                    ));
+                }
                 _ => return Err(format!("unknown option \"-{flag}\"")),
             }
         }
