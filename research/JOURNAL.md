@@ -9938,11 +9938,13 @@ record.
   input (`research/corpus/POLICY.md`). Both aggregates sit under xz
   -9e's, 1.829058 and 1.403395. The price is 3.1x and 4.6x the default's
   encode time and 14.5x and 9.9x its decode time: above S2-A141's 6.7x
-  on the gate cases, under #1824's 28x on one text slice. Silesia's peak
-  RSS is equal at both levels and under 1 GiB. The pass took 170
-  minutes, under `bench-report.yml`'s 300 (#1857) and over the 180 it
-  replaced. | **Not measured:** `-4` per file, which the reports do not
-  print, so which files keep a `Cm` frame and whether `-4` wins or ties
-  every file against zstd -19 is unread; run-to-run spread. The default
-  switch ADR-0079 deferred to this read is #1870's.
-  `research/progress.jsonl` it251.
+  on the gate cases, under S2-A142's 28x on one text slice. Silesia's
+  peak RSS is equal at both levels and under 1 GiB. The pass took 170
+  minutes, 10 under the 180 cap `bench-report.yml` carried before
+  d2c0a92 ("bench-report: the pass cap is 300 minutes, room for the -4
+  row (#1857)") and 130 under the 300 it carries now; #1857's
+  extrapolated 188 overstated it by 18. | **Not measured:** `-4` per file, which
+  the reports do not print, so which files keep a `Cm` frame and whether
+  `-4` wins or ties every file against zstd -19 is unread; run-to-run
+  spread. ADR-0080 decides the default switch ADR-0079 deferred to this
+  read: the default stays `-3`. `research/progress.jsonl` it251.
