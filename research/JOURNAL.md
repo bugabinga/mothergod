@@ -10406,17 +10406,17 @@ record.
 
   | stage | share | s |
   |---|---|---|
-  | literal: SSE, two `locate`s per node, each `stretch(p)` and a recomputed `stretch_bound()`, plus `floor` | 23.5% | 13.9 |
+  | literal: SSE, two `locate`s per node, each `stretch(p)` and a recomputed `stretch_bound()`, plus `floor` | 23.5% | 13.8 |
   | literal: `logistic_mix_node`, six `stretch` per node | 21.5% | 12.7 |
-  | literal: `expert_prefix_sums`, 6 x 256 serial adds per byte | 15.6% | 9.2 |
+  | literal: `expert_prefix_sums`, 6 x 256 serial adds per byte | 15.7% | 9.3 |
   | literal: walk closure, squash, refine, bin update, gradient, EMAs | 10.9% | 6.4 |
   | literal: `decode_bit` and its `round` | 8.0% | 4.7 |
   | literal: `fma` calls, `exp`, weight and bank update, rest | 6.6% | 3.9 |
   | token and copy: offset raw bits, one range division per bit | 3.7% | 2.2 |
-  | token and copy: flag, length, slot, bucket `Model::decode` | 2.9% | 1.7 |
+  | token and copy: flag, length, slot, bucket `Model::decode` | 3.0% | 1.7 |
   | token and copy: byte-at-a-time copy loop, `after_copy` | 2.4% | 1.4 |
   | token and copy: libc `memcpy`, output writes | 3.4% | 2.0 |
-  | inverse filter, frames, kernel | 1.2% | 0.7 |
+  | inverse filter, frames, kernel, rest | 1.4% | 0.8 |
 
   Per byte class, from a scratch build counting tokens in
   `decode_tokens`, whose sums equal each file's length: 21,088,971 literal
@@ -10441,11 +10441,11 @@ record.
   `(context, p)`, the prefix rebuild computes 1,536 serial sums where the
   walk reads three per expert per node, and `floor`, `round` and `fma`
   are calls on the baseline x86-64 target. The SSE and prefix stages
-  together hold 39.1% of decode time, so removing them whole bounds the
+  together hold 39.2% of decode time, so removing them whole bounds the
   win at 1.64x, nowhere near 19x: it does not change the route.
   Condition changed against S2-A78: that entry judged `Literal::mix`'s
-  cumulative table, and the logit walk (S2-A106) reads range sums per
-  expert, which need no table. |
+  cumulative table, and the logistic walk S1-P8 shipped (S2-A102) reads
+  range sums per expert, which need no table. |
   Verdict: **rejected** as framed. M9's wiring slice is an entropy
   back end for the default level, literals and tokens both, and a copy
   loop, not a literal coder alone. Question 2 prices the token coder
