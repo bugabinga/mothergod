@@ -37,8 +37,7 @@ Silesia. The wins are Canterbury's six smallest text and source files
 `xargs.1`), its `kennedy.xls` spreadsheet, and Silesia's `ooffice` library.
 The widest losses are Silesia's `sao` star catalog, `mozilla` install archive
 and `mr` medical image, and Canterbury's `sum` executable. Closing Silesia
-heads [`ROADMAP.md`](ROADMAP.md), as open-ended research with no date
-attached. Every file's numbers:
+is open-ended research with no date attached. Every file's numbers:
 [Canterbury](docs/benchmarks/canterbury.md),
 [Silesia](docs/benchmarks/silesia.md).
 
@@ -47,12 +46,17 @@ attached. Every file's numbers:
 decoded it at 2.447 MB/s. In the same run, `xz -9e` encoded Silesia at 2.029
 MB/s and decoded it at 68.872 MB/s, more than nine times faster to encode and
 more than twenty times faster to decode.
+Speed heads [`ROADMAP.md`](ROADMAP.md#m9-speed-adr-0084): the first release
+waits until the default level encodes and decodes at half of `xz -9e`'s speed
+or better on both corpora, in the same run, while still beating `zstd -19` on
+each.
 The same two reports name the machine, give every file's rates, and end
 with every level of gzip, zstd and xz beside mothergod, peak memory
 included. The commands that regenerate them:
 [`docs/benchmarks/`](docs/benchmarks/README.md#regenerating).
 
-**Pre-alpha: no release, no packaged binary, no version tag.** The container
+**Pre-alpha: no release, no packaged binary, no version tag.** The first
+release waits on the speed bar above. The container
 format (`FORMAT_VERSION` 22) is specified but not frozen. Before the first
 release, each format change retires the version before it, so the next build
 that changes the format will not read a file you compress today. After that,
