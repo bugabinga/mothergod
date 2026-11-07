@@ -10386,3 +10386,70 @@ record.
   now quote the bin's read. | **Not measured:** other CPUs; whether a
   non-zero `Lz` stream that still decodes all literals costs more than
   zero bits; a second run of either. `research/progress.jsonl` it303.
+- S2-R43 | REJECTED | Charter #1922 question 1, where the default level's
+  decode second goes on Silesia. Hypothesis, ROADMAP M9's route as
+  written: the decoder is the literal model (S2-R37's 86%), so a new
+  literal coder alone at the bar's rate brings `-3` to half of xz -9e's
+  decode rate. The first half holds; the second does not. Journal only,
+  no codec change; the counting build was scratch, deleted with this
+  verdict. | Measured, main at `6283612`, version 22, release build with
+  line tables only (codegen unchanged), AMD EPYC 9V45, every process
+  pinned to one CPU, all 12 Silesia files at the `bench/corpus.toml`
+  pins, 211,938,580 bytes. `mothergod -3` wrote 52,353,734 bytes
+  (1.976 b/B, the published figure) and every decode compared equal.
+  `-3` decodes the set in **58.97 s** (3.59 MB/s); xz 5.8.3 `-9e -T1`
+  in **1.55 s** (136.6 MB/s, 48,456,004 bytes, the published 1.829). The
+  bar on this CPU is 3.10 s, a **19.0x** cut. `perf record -F 999`,
+  59,319 samples over the 12 decodes, by symbol after inlining; the
+  out-of-line `floor`, `round` and `fma` leaves are assigned by call site,
+  each one in the literal walk only:
+
+  | stage | share | s |
+  |---|---|---|
+  | literal: SSE, two `locate`s per node, each `stretch(p)` and a recomputed `stretch_bound()`, plus `floor` | 23.5% | 13.8 |
+  | literal: `logistic_mix_node`, six `stretch` per node | 21.5% | 12.7 |
+  | literal: `expert_prefix_sums`, 6 x 256 serial adds per byte | 15.7% | 9.3 |
+  | literal: walk closure, squash, refine, bin update, gradient, EMAs | 10.9% | 6.4 |
+  | literal: `decode_bit` and its `round` | 8.0% | 4.7 |
+  | literal: `fma` calls, `exp`, weight and bank update, rest | 6.6% | 3.9 |
+  | token and copy: offset raw bits, one range division per bit | 3.7% | 2.2 |
+  | token and copy: flag, length, slot, bucket `Model::decode` | 3.0% | 1.7 |
+  | token and copy: byte-at-a-time copy loop, `after_copy` | 2.4% | 1.4 |
+  | token and copy: libc `memcpy`, output writes | 3.4% | 2.0 |
+  | inverse filter, frames, kernel, rest | 1.4% | 0.8 |
+
+  Per byte class, from a scratch build counting tokens in
+  `decode_tokens`, whose sums equal each file's length: 21,088,971 literal
+  bytes (**9.95%** of output) and 190,849,609 copied bytes in 10,545,518
+  match and 2,858,223 rep tokens. The literal path (86.1%) costs
+  **2,409 ns per literal byte**; the token and copy path (12.5%) costs
+  549 ns per copy token, 38.5 ns per copied byte. | Mechanism, three
+  findings. (1) The token and copy path alone takes **7.35 s, 2.4x the
+  whole 3.10 s budget**, so a literal coder at zero cost still misses the
+  bar. Its cost is coder shape, not memory traffic: `Model::decode` walks
+  a frequency table linearly, offsets code their raw bits one range
+  division each, the copy pushes one byte per iteration, and token flags
+  decode once per literal too. (2) The literal budget is at most 147 ns
+  per literal byte with the token and copy path at zero, 16x under
+  today's, before any of it is spent on that path. That prices question
+  2: eight adaptive binary decisions with no mixing, candidate (a), is
+  the class whose per-byte work fits; (b) and (c) stretch and squash per
+  expert per bit, and their cost against 147 ns is untested. (3) Part of
+  today's literal path is work the format does not require, and cutting
+  it leaves the bitstream bit-identical: `stretch_bound()` is a constant
+  evaluated twice per node, `refine` and `update` each `locate` the same
+  `(context, p)`, the prefix rebuild computes 1,536 serial sums where the
+  walk reads three per expert per node, and `floor`, `round` and `fma`
+  are calls on the baseline x86-64 target. The SSE and prefix stages
+  together hold 39.2% of decode time, so removing them whole bounds the
+  win at 1.64x, nowhere near 19x: it does not change the route.
+  Condition changed against S2-A78: that entry judged `Literal::mix`'s
+  cumulative table, and the logistic walk S1-P8 shipped (S2-A102) reads
+  range sums per expert, which need no table. |
+  Verdict: **rejected** as framed. M9's wiring slice is an entropy
+  back end for the default level, literals and tokens both, and a copy
+  loop, not a literal coder alone. Question 2 prices the token coder
+  beside the literal class. | **Not measured:** other CPUs; the published
+  runner (EPYC 9V74), whose bar reads 34.4 MB/s against 2.447;
+  multi-worker decode; Canterbury; whether (3)'s cuts compose to the
+  sum of their shares. `research/progress.jsonl` it304.

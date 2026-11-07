@@ -138,10 +138,13 @@ and xz -4 is smaller and faster both ways.
 
 First because 0.1 waits on it, and because the trigger M5 set for decode
 speed, a user's ask, fired with the operator's. The evidence fixes the
-route: the decoder is the literal model (S2-R37, 86% of the cheapest
-encoder tier's time), S1-P6 is exhausted within the format (S2-A78,
-S2-A88, S2-A90), so the bar is a new literal coder for the default level,
-a `FORMAT_VERSION` bump under its own ADR, with `-4` untouched (ADR-0080)
+route: the decoder is mostly the literal model (S2-R37, 86% of the
+cheapest encoder tier's time), S1-P6 is exhausted within the format
+(S2-A78, S2-A88, S2-A90), and the token and copy path alone overruns the
+bar's whole decode budget (S2-R43), so the bar is a new entropy back end
+for the default level, literals and tokens both, a `FORMAT_VERSION` bump
+under its own ADR, plus a decoder copy loop that needs no bump, with `-4`
+untouched (ADR-0080)
 and S2-A88/S2-A90 open to a re-run under the changed objective, rate at
 rung 1 rather than ratio alone. Rung 1 is the floor the bar may spend
 into, never below.
@@ -150,8 +153,9 @@ Items, in [milestone M9](https://github.com/bugabinga/mothergod/milestone/5),
 in order: the share printed by the finals reports and rendered on /status
 against the bar (#1921), measurement first for the reason M5 gave; the
 charter (#1922), three questions, the decode profile S2-R36 left
-unmeasured, the literal coder class that holds rung 1 at the bar's decode
-rate, and the encode tier at the new floor; then the wiring slice, with its ADR
+unmeasured (S2-R43), the literal coder class that holds rung 1 at the
+bar's decode rate, priced beside the token coder, and the encode tier at
+the new floor; then the wiring slice, with its ADR
 and bump, filed into this milestone by the run that closes #1922 on a
 positive sealed verdict (the charter's own done condition), so /status
 never reads M9 done with the bar unmet; a rejection of every class
