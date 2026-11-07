@@ -313,8 +313,9 @@ streams.
   measured against; `research/JOURNAL.md` S1-P7, S2-A71). A `Cm` frame's
   output is capped lower, at 16 MiB (`cm_path::MAX_OUTPUT_LEN`), as
   `TooLarge` from its declared length before any allocation, because its
-  decode costs about 5 µs per output byte whatever the stream: 88 s
-  measured at that cap against `Lz`'s 314 s at 256 MiB (ADR-0079). The
+  decode pays a full model walk per output byte whatever the stream; the
+  measured cost at that cap is in `cm_path::MAX_OUTPUT_LEN`'s
+  documentation (ADR-0079). The
   cap is the block length `mothergod::compress` cuts at, so it refuses no
   frame this encoder writes.
 - Bit-identical output across platforms for the same input and version:

@@ -230,8 +230,8 @@ release.
 - cli, library: `-4` writes smaller context-mixing frames on text and
   structured data, because its model also reads order 2, the current word
   and the word before it: 0.011 bits/byte smaller on average over `bench/`'s
-  11 synthetic training cases, up to 0.050 on `json_records`, and 0.026 on
-  both held-out ones. Decoding such a frame takes about 18% longer.
+  11 synthetic training cases and 0.026 on both held-out ones. Decoding
+  such a frame takes about 18% longer.
   `-1` to `-3` write what they wrote. A file an earlier build wrote no
   longer decodes and must be re-compressed. `FORMAT_VERSION` 19 to 20,
   ADR-0081 (#1905).

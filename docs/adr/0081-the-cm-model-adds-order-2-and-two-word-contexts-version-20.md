@@ -22,5 +22,6 @@ Every new table has the existing constant size and starts fresh per frame.
 
 `-4` frames that carry `Cm` get smaller; `-1` to `-3` frames change only their version byte and check value.
 A `Cm` decode does about 18% more work per byte, measured in the speed gate's calibration unit; the default level's decode cost is unchanged, so the speed ratchet does not move.
+A hostile `Cm` frame at the 16 MiB cap decodes 27% slower in wall time, 91 s to 117 s on one runner, still under `Lz`'s worst case; `cm_path::MAX_OUTPUT_LEN` holds the measurement.
 The model's tables grow by two 4 MiB order tables, still constant and allocated fallibly.
 A file `-4` wrote under version 19 no longer decodes and must be re-compressed, which no release has had to promise against (ADR-0050).

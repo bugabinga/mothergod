@@ -129,8 +129,9 @@ fn decode_rejects_a_length_over_its_bound_before_any_work() {
 
 /// A caller's bound past [`MAX_OUTPUT_LEN`] buys it nothing: issue
 /// #1808's `u32::MAX` would otherwise reach 4 GiB of output and work, and
-/// [`MAX_DECODED_LEN`] about 1,400 s of it. The ceiling itself is admitted,
-/// so the empty stream falls to the floor instead.
+/// [`MAX_DECODED_LEN`] 16 times the ceiling's measured worst case. The
+/// ceiling itself is admitted, so the empty stream falls to the floor
+/// instead.
 #[test]
 fn decode_caps_a_callers_bound_at_the_output_ceiling() {
     for bound in [MAX_DECODED_LEN, u32::MAX] {

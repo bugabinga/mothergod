@@ -10157,7 +10157,16 @@ record.
   interleaved reads each: the path 738.3 to 739.2 calibration steps per
   byte on main, 871.7 to 872.8 on the keeper (**+133.7**, about 18%); the
   hybrid's 111.4 to 112.3 both ways, and `baseline_gate check` passes with
-  `bench/baseline.json` moved by digest only. | Verdict: **accepted**,
+  `bench/baseline.json` moved by digest only. Worst-case decode,
+  `cm_path::decode` on pseudo-random streams, release build, AMD EPYC
+  7763 4 logical cores runner: 4 KiB declaring the 16 MiB
+  `MAX_OUTPUT_LEN`, main 91.36 and 91.42 s, the keeper 116.39 and
+  116.87 s, interleaved (**+27%**, more than the calibration unit's 18%
+  says); the keeper at 1 KiB, 512 KiB and 4 MiB less 64 bytes, each
+  declaring 4 MiB, one run each, 6,405, 6,783 and 6,887 ns per byte.
+  The hostile frame at the cap now costs about 37% of `Lz`'s 314 s at
+  `codec::MAX_DECODED_LEN`, a figure read on an earlier build and
+  another runner, where S2-A142 left it under a third. | Verdict: **accepted**,
   train improvement and no sealed regression, wired as `FORMAT_VERSION`
   20 (ADR-0081). | **Not measured:** the finals at `-4`; the word
   contexts' share of the sealed gain against order 2's, because the

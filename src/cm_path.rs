@@ -53,12 +53,14 @@ use crate::{Error, fan_out, logistic, try_filled_vec};
 
 /// The most bytes one [`crate::Method::Cm`] frame, and one [`decode`],
 /// outputs: a ceiling below [`MAX_DECODED_LEN`], because every output byte
-/// pays a full walk and none is a copy. Measured on random streams of 1 KiB,
-/// 512 KiB and 4 MiB less 64 bytes, each declaring 4 MiB (release build,
-/// INTEL XEON PLATINUM 8573C, one run each): 5.0 to 5.4 µs per output byte
-/// whatever the stream, and one declaring this ceiling decoded in 88 s, so
-/// the worst case is linear and a hostile frame here costs under a third of
-/// `Lz`'s measured 314 s at [`MAX_DECODED_LEN`]. It equals the block length
+/// pays a full walk and none is a copy. Measured at version 20 on
+/// pseudo-random streams (release build, AMD EPYC 7763 4 logical cores):
+/// 1 KiB, 512 KiB and 4 MiB less 64 bytes, each declaring 4 MiB, 6.4 to
+/// 6.9 µs per output byte whatever the stream; 4 KiB declaring this
+/// ceiling, 116.4 and 116.9 s over two runs. The worst case is linear, and
+/// a hostile frame here costs about 37% of `Lz`'s 314 s at
+/// [`MAX_DECODED_LEN`], a figure read on an earlier build and another
+/// runner (`research/JOURNAL.md` S2-A150). It equals the block length
 /// [`crate::compress`] cuts at, so no frame this crate writes is refused.
 pub const MAX_OUTPUT_LEN: u32 = 16 * 1024 * 1024;
 
