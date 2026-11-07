@@ -86,8 +86,8 @@ const _: () = assert!(
     "a Cm frame is a coded frame, under the coded frames' ceiling"
 );
 
-/// The reciprocal of [`PROBABILITY_FLOOR`], and so the most bytes one
-/// stream byte decodes to: [`decode`]'s bomb guard.
+/// The reciprocal of `PROBABILITY_FLOOR`, the outer mixer's clamp, and so
+/// the most bytes one stream byte decodes to: [`decode`]'s bomb guard.
 ///
 /// Invariant: every node codes at a probability inside the floor, so it
 /// costs at least `-log2(1 - PROBABILITY_FLOOR)`, which exceeds
