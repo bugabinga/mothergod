@@ -100,6 +100,40 @@ fn round_trips_text_repeats_runs_and_noise() {
     round_trips(&[half.as_slice(), &text, half.as_slice()].concat());
 }
 
+/// Fixed-width records whose fields recur by column, and interleaved
+/// 16-bit samples: the data classes the record and sparse contexts read
+/// (`research/JOURNAL.md` S2-A151), round tripped, with the record length
+/// found on the way.
+#[test]
+fn round_trips_fixed_width_records_and_interleaved_samples() {
+    let mut noise = Xorshift32::new(29);
+    let records: Vec<u8> = (0u32..800)
+        .flat_map(|row| {
+            let id = row.to_le_bytes();
+            let flags = u8::try_from(row % 3).expect("below 3");
+            let reading = noise.next().expect("an endless stream").to_le_bytes()[0];
+            [
+                id[0], id[1], 0, 0, b'|', flags, reading, b'\n', 0x7f, 0x01, 0, 0, 0, b'#',
+            ]
+        })
+        .collect();
+    round_trips(&records);
+    let mut records_seen = Records::new();
+    for &b in &records {
+        records_seen.push(b);
+    }
+    assert_eq!(records_seen.length, 14, "every row is 14 bytes");
+
+    let samples: Vec<u8> = (0i32..6000)
+        .flat_map(|i| {
+            let left = i16::try_from(i * 7 % 2001 - 1000).expect("within i16");
+            let right = left.wrapping_neg();
+            [left.to_le_bytes(), right.to_le_bytes()].concat()
+        })
+        .collect();
+    round_trips(&samples);
+}
+
 /// Matches longer than [`MATCH_VERIFY_LIMIT`] and past the last
 /// [`length_bucket`]: the match model grows them a byte at a time on both
 /// sides.
@@ -288,7 +322,7 @@ fn a_followed_match_grows_past_the_verify_limit() {
 /// repeat longer than the verify limit, so every input of the mixer
 /// speaks, then more noise than the order tables hold, so contexts collide
 /// and evict and the hash decides which. The journal's numbers for this path (S2-A133 to S2-A138,
-/// S2-A150) were
+/// S2-A150, S2-A151) were
 /// read through this model, and the wiring slice ships the model that
 /// produced them; a change here is a new candidate, re-read on train and
 /// sealed, and this pin moves with its journal entry. Also a determinism
@@ -313,7 +347,7 @@ fn the_coded_stream_of_a_mixed_input_is_pinned() {
 
     assert_eq!(
         (stream.len(), crate::crc32::crc32(&stream)),
-        (66_532, 772_251_629),
+        (66_647, 2_781_947_311),
         "the model changed: re-read it as a candidate"
     );
 }
@@ -421,6 +455,80 @@ fn the_word_pair_skips_the_gap_and_forgets_the_word_before_the_pair() {
         words_after(b"the cat ").bigram,
         words_after(b"cat:").bigram,
         "once a word ends it is the previous one, the current empty"
+    );
+}
+
+/// [`Records`] after pushing every byte of `prefix`.
+fn records_after(prefix: &[u8]) -> Records {
+    let mut records = Records::new();
+    for &b in prefix {
+        records.push(b);
+    }
+    records
+}
+
+/// A length needs four evenly spaced occurrences of one value, three equal
+/// gaps; three occurrences, unequal gaps or a run (gap one) set none.
+#[test]
+fn a_record_length_is_three_equal_gaps_above_one() {
+    assert_eq!(records_after(b"x..x..x..").length, 0, "two gaps");
+    assert_eq!(records_after(b"x..x..x..x").length, 3);
+    assert_eq!(records_after(b"x..x...x..x").length, 0, "unequal gaps");
+    assert_eq!(records_after(b"aaaaaaaa").length, 0, "a run is no record");
+    assert_eq!(
+        records_after(b"x..x..x..x.y.y.y.y").length,
+        2,
+        "the latest detection wins"
+    );
+}
+
+/// A length is a gap between two pushed bytes, so it never reaches past
+/// the prefix, and [`Records::above`] reads the byte one or two lengths
+/// back or `0` where the prefix is too short.
+#[test]
+fn above_reads_whole_records_back_or_nothing() {
+    let prefix = b"ab-ab-ab-ab-";
+    let records = records_after(prefix);
+    assert_eq!(records.length, 3);
+    assert!(records.length <= records.seen);
+    assert_eq!(records.above(prefix, 1), u64::from(b'a') + 1);
+    assert_eq!(records.above(prefix, 2), u64::from(b'a') + 1);
+    assert_eq!(
+        records.above(&prefix[..4], 2),
+        0,
+        "two records reach before the start"
+    );
+    assert_eq!(Records::new().above(prefix, 1), 0, "no length, no column");
+}
+
+#[test]
+fn byte_back_tells_a_zero_byte_from_absence() {
+    assert_eq!(byte_back(&[0], 1), 1);
+    assert_eq!(byte_back(&[7, 0], 2), 8);
+    assert_eq!(byte_back(&[0], 2), 0);
+    assert_eq!(byte_back(&[], 1), 0);
+}
+
+/// The last row [`CmPath::walk`] can address in each [`Calibration`]
+/// table exists: node 255 under the longest match bucket predicting a one,
+/// the last byte 255, and the order-2 hash's top row.
+#[test]
+fn every_calibration_row_a_walk_can_name_is_in_its_table() {
+    let mut calibration = Calibration::try_new().expect("constant sizes");
+    let last_node = BYTE_NODES - 1;
+    let last_match_state = (LENGTH_BUCKETS - 1) * 2 + 1 + 1;
+    let rows = [
+        last_node,
+        255 * BYTE_NODES + last_node,
+        ((1 << APM_ORDER2_BITS) - 1) * BYTE_NODES + last_node,
+        last_match_state * BYTE_NODES + last_node,
+    ];
+    let p = calibration.refine(rows, 0.3);
+    assert!((PROBABILITY_FLOOR..=1.0 - PROBABILITY_FLOOR).contains(&p));
+    calibration.update(rows, 0.3, true);
+    assert!(
+        calibration.refine(rows, 0.3) > p,
+        "a one moves every row up"
     );
 }
 
