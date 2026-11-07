@@ -26,9 +26,17 @@ it reports a survey as not run.
 
 The one run where the expensive reads are worth their tokens (ADR-0025).
 
-- `ROADMAP.md` against what actually merged: `git log`,
-  `gh pr list --state merged`. Where the roadmap and the log disagree,
-  the log wins and the roadmap gets fixed.
+- `ROADMAP.md` against what actually merged (`git log`,
+  `gh pr list --state merged`) and against the tracker. Where the
+  roadmap and the log disagree, the log wins and the roadmap gets fixed,
+  this wake. Four checks, each a fix when it fails: the rank still
+  follows the evidence; the top-ranked open milestone holds an item the
+  heartbeat can pick, open and not `blocked-on-human`, because a top
+  milestone with no pickable item idles duty 4c onto journal leads
+  without a word; a bar the operator set (ADR-0084's speed bar) reads
+  off a published number, never off a sentence; and the last deliverable
+  section is still the end goal, 1.0, with what stands between the top
+  section and it written down (operator steering, 2026-11-07).
 - `.github/scripts/state`: the checks, open PRs with ages, open
   issues, the ops-log tail. The delta core already ran it; read it
   again only if the core's read is stale.
