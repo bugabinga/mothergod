@@ -1,6 +1,6 @@
 # ADR-0074: The parse engine is milestone M5
 
-Status: accepted · Date: 2026-10-18 · Prompted by the operator's Telegram question of 2026-10-18 (when to tackle speed, ratio on large files and memory) and the steering that followed it (comparisons to the field at every level)
+Status: accepted · Date: 2026-10-18 · Decode-speed clause superseded by ADR-0084 · Prompted by the operator's Telegram question of 2026-10-18 (when to tackle speed, ratio on large files and memory) and the steering that followed it (comparisons to the field at every level)
 
 ## Context
 

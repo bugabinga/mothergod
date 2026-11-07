@@ -31,7 +31,10 @@ Outcome metrics (the product):
   fast; a win moves a neighbour. Decode holds a ratchet against unexplained
   slowdown (`baseline_gate check`, M5). Published: the frontier tables in
   `docs/benchmarks/`, one machine, indicative only, and the neighbours with
-  the date they last moved on /status, both #1340's deliverable.
+  the date they last moved on /status, both #1340's deliverable. The bar
+  release 0.1 waits on (ADR-0084): the default level holds RATIO rung 1
+  and encodes and decodes at no less than half of xz -9e's rate in the
+  same pass, on both finals; its reading is the share line #1921 prints.
 - **USERS**: evidence real humans use and like it: GitHub stars, forks and
   watchers with trend, external (non-agent, non-operator) issue and PR
   authors, crates.io downloads once published, and mentions found in the
@@ -81,19 +84,31 @@ to call this project's most-worked area "pending" (operator report,
 
 A **milestone** is a deliverable with a definition of done. Its items are
 issues in a GitHub Milestone of the same name, linked from its section
-below, and an item is done when its issue closes (ADR-0047): M5, M6, M7
-and M8 today. A **program** is continuous work with a target but no finish
-line, so it has no tracker milestone and nothing to count: M3 (ratio).
-Milestones delivered before the tracker held items (M0, M1, M2, M4) keep
-one paragraph each naming what shipped, and no retroactive issues. The numbering is creation order, not a dependency chain, and a
+below, and an item is done when its issue closes (ADR-0047): M9, M6, M10,
+M5, M7 and M8 today. A **program** is continuous work with a target but no
+finish line, so it has no tracker milestone and nothing to count: M3
+(ratio). Milestones delivered before the tracker held items (M0, M1, M2,
+M4) keep one paragraph each naming what shipped, and no retroactive
+issues. The numbering is creation order, not a dependency chain, and a
 program gates nothing; M7 already says this of itself. Section order is
-rank, and the status page renders it top to bottom.
+rank, live work first and delivered history last, and the status page
+renders it top to bottom.
 
-Release 0.1 (M6) therefore gates on its own items alone. It promises what
-M0/M1/M2/M4 delivered: lossless, adversarially tested, deterministic across
-platforms, a versioned format, a CLI and a library. It does not promise any
-rung of the RATIO ladder, whose standing is on /status. Waiting on a program
-is waiting forever, because a program has no state in which it is finished.
+Release 0.1 (M6) waits on M9 by the operator's decision (ADR-0084), a
+milestone with a finish line, the one kind of waiting that ends. It
+promises what M0/M1/M2/M4/M8 delivered plus M9's bar: lossless,
+adversarially tested, deterministic across platforms, a versioned format,
+a CLI and a library that fit the genre, at a speed in the realm of the
+field. It does not promise any rung of the RATIO ladder beyond the one
+M9's bar holds, and it never waits on a program, because a program has no
+state in which it is finished.
+
+The end goal is the mission's: a compressor real humans choose. The last
+deliverable is 1.0 (M10), where the decode-forever promise starts
+(ADR-0050); the ratio and users programs continue past it, and no later
+milestone is named until evidence names it, the way M9 arrived. The weekly
+deep survey holds this file to the merge log and the tracker (its skill
+names the checks); where they disagree, the log wins and this file moves.
 
 The daily heartbeat picks the top unblocked item and ships the smallest useful
 slice of it. Items marked `blocked-on-human` need the operator.
@@ -106,32 +121,68 @@ means one CLI that both compresses and decompresses, and a first-class
 library crate; both are table stakes, not stretch goals. Beyond that shape, innovation is open: anything
 goes as long as it is useful to humans.
 
-## M0: Scaffolding ✅
+## M9: Speed (ADR-0084)
 
-Crate skeleton, v0 frame format (Stored), quality-gate CI, governance and
-agent processes. Done 2026-08-20.
+The operator's gate on 0.1, set 2026-11-07: no release until the
+compression speeds are in the realm of the competition. The bar that makes
+it countable: the default level holds rung 1 (aggregate under zstd -19 on
+each finals corpus) and its encode and decode MB/s are each at least half
+of xz -9e's in the same report pass, on both finals. xz -9e is the
+reference because it is the slowest level the field ships; half, because
+a user weighing the field's slowest level against a smaller output accepts
+a factor of two and not an order of magnitude. The bar is the operator's
+to move, and its reading lives on /status and in the frontier sections of
+`docs/benchmarks/`, never here (ADR-0048): on the 2026-11-06 Silesia pass
+the default sits well under it on both axes, decode further than encode,
+and xz -4 is smaller and faster both ways.
 
-## M1: Port the founding-session codec ✅
+First because 0.1 waits on it, and because the trigger M5 set for decode
+speed, a user's ask, fired with the operator's. The evidence fixes the
+route: the decoder is the literal model (S2-R37, 86% of the cheapest
+encoder tier's time), S1-P6 is exhausted within the format (S2-A78,
+S2-A88, S2-A90), so the bar is a new literal coder for the default level,
+a `FORMAT_VERSION` bump under its own ADR, with `-4` untouched (ADR-0080)
+and S2-A88/S2-A90 open to a re-run under the changed objective, rate at
+rung 1 rather than ratio alone. Rung 1 is the floor the bar may spend
+into, never below.
 
-The founding artifacts imported to `research/imports/session-1/` and
-import-verified lossless; the archive codec ported into `src/` as
-reviewable modules (filters, parse, models, coder) behind the frame
-format, under the crate's rules the archive predates (decoder never
-panics, docs, strict lints, invariants written down, JOURNAL S1-A*); the
-Python harness verified against the it31 champion's sealed validation,
-then retired to git history (commit `1a3b1c8`, ADR-0006). Done 2026-08-28.
+Items, in [milestone M9](https://github.com/bugabinga/mothergod/milestone/5),
+in order: the share printed by the finals reports and rendered on /status
+against the bar (#1921), measurement first for the reason M5 gave; the
+charter (#1922), three questions, the decode profile S2-R36 left
+unmeasured, the literal coder class that holds rung 1 at the bar's decode
+rate, and the encode tier at the new floor; then the wiring slice, filed
+from the charter's positive sealed verdict with its ADR and bump. Done
+when the last item closes and /status reads the bar met on both finals.
 
-## M2: Honest benchmarking (JOURNAL S1-D2) ✅
+## M6: Release 0.1
 
-The Rust `bench/` harness (ADR-0006) pinning Silesia and Canterbury by
-URL and SHA-256 with the train/sealed/finals split of
-`research/corpus/POLICY.md`; the adversarial decode seed corpus and suite
-(`tests/adversarial/`, `docs/TESTING.md` layer 2); ideal-cost accounting
-inside the codec of record (the whole-codec pass was retired in #1752,
-JOURNAL S2-A38); the required `ratio` check against
-`bench/baseline.json` (layer 7); and the per-file reports in
-`docs/benchmarks/`, regenerated weekly and on a pin merge by
-`bench-report.yml`. Done 2026-08-28.
+Waits on M9 (ADR-0084): the two operator items below carry that condition
+as their ask, and the curator's grooms hold it.
+
+Items, in [milestone M6](https://github.com/bugabinga/mothergod/milestone/1):
+the `mothergod` CLI with file arguments and the `.mgdc` suffix (#359); the
+library surface reviewed for 0.1 (#360); the release workflow that builds
+binaries and drafts the notes from `CHANGELOG.md` (#445); the surface's
+"no release" sentences, false the hour the release publishes (#1800); the
+first GitHub release, operator-dispatched after M9 (#537,
+`blocked-on-human`); and the crates.io publish, on the operator's token
+(#644, `blocked-on-human`).
+
+## M10: Release 1.0
+
+The end deliverable: a 1.0 tag whose `FORMAT_VERSION` every later release
+reads, forever (ADR-0050, `docs/format/SPEC.md`'s status paragraph), and
+the library under semver 1.0. What decides the moment is evidence, not a
+date: users of 0.1 on record in `marketing/JOURNAL.md`, and a format that
+held across the fixes they reported.
+
+Items, in [milestone M10](https://github.com/bugabinga/mothergod/milestone/6),
+filed when 0.1 ships because each is a review of what 0.1 taught: the
+format freeze review (what the spec still owes before a version is
+forever); the API freeze review (#360 reviewed a draft's); and the 1.0
+dispatch, the operator's. Nothing is filed earlier, because an issue the
+ladder must not pick yet is a trap the ladder walks into (ADR-0074).
 
 ## M3: Close the gaps (research program)
 
@@ -168,6 +219,33 @@ and narrowed the six Silesia losses to zstd -19 that remain). The filter bank th
 14 to 16, it193 to it195) ended with the per-field byte-order rejection
 (it196). Target: beat zstd -19 per-file on all of Silesia/Canterbury
 with real bitstreams; then xz -9e.
+
+## M0: Scaffolding ✅
+
+Crate skeleton, v0 frame format (Stored), quality-gate CI, governance and
+agent processes. Done 2026-08-20.
+
+## M1: Port the founding-session codec ✅
+
+The founding artifacts imported to `research/imports/session-1/` and
+import-verified lossless; the archive codec ported into `src/` as
+reviewable modules (filters, parse, models, coder) behind the frame
+format, under the crate's rules the archive predates (decoder never
+panics, docs, strict lints, invariants written down, JOURNAL S1-A*); the
+Python harness verified against the it31 champion's sealed validation,
+then retired to git history (commit `1a3b1c8`, ADR-0006). Done 2026-08-28.
+
+## M2: Honest benchmarking (JOURNAL S1-D2) ✅
+
+The Rust `bench/` harness (ADR-0006) pinning Silesia and Canterbury by
+URL and SHA-256 with the train/sealed/finals split of
+`research/corpus/POLICY.md`; the adversarial decode seed corpus and suite
+(`tests/adversarial/`, `docs/TESTING.md` layer 2); ideal-cost accounting
+inside the codec of record (the whole-codec pass was retired in #1752,
+JOURNAL S2-A38); the required `ratio` check against
+`bench/baseline.json` (layer 7); and the per-file reports in
+`docs/benchmarks/`, regenerated weekly and on a pin merge by
+`bench-report.yml`. Done 2026-08-28.
 
 ## M4: Production hardening ✅
 
@@ -220,8 +298,9 @@ Out of M5, with its trigger written down: decode speed. S1-P6 is
 exhausted at every slice the format allows (bit-decomposed coding shipped
 under the floor, tANS loses on bits/byte, S2-A88 and S2-A90, SIMD closed
 on decode by ADR-0053), so a faster decode is a second codec path and a
-format bump, which waits for a user who asks for it on an issue they open.
-Until then the decode floor is a ratchet.
+format bump. The trigger, a user's ask, fired 2026-11-07 with the
+operator's (ADR-0084), and the work is M9's; the decode floor stays a
+ratchet until M9's wiring slice moves it.
 
 The floor is enforced as a ratchet, not as 1 MB/s on Silesia. Same-CPU
 Silesia decode snapshots (`docs/benchmarks/silesia.md`, CPU on each) fell
@@ -269,12 +348,3 @@ idiom matrix (#982) landed, every gap measured before a matrix existed
 the suite on FreeBSD 15 in the weekly monster matrix, so "fits BSD" is a
 claim a run makes. A new gap is a row the suite flips in
 `tests/fit/*.txt`, then an issue; the count is on /status.
-
-## M6: Release 0.1
-
-Items, in [milestone M6](https://github.com/bugabinga/mothergod/milestone/1):
-the `mothergod` CLI with file arguments and the `.mgdc` suffix (#359); the
-library surface reviewed for 0.1 (#360); the release workflow that builds
-binaries and drafts the notes from `CHANGELOG.md` (#445); the first GitHub
-release, operator-dispatched (#537, `blocked-on-human`); and the crates.io
-publish, on the operator's token (#644, `blocked-on-human`).
