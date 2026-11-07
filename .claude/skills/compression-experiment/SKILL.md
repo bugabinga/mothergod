@@ -66,10 +66,11 @@ When measurement is possible:
    once, with `decode_cost_delta`.
    A try that makes a level's doc false (`Level`, `src/lib.rs`) is a
    level change, one candidate, steps 4 to 8 once: no gate watches
-   encode, so the PR body states the trade as the gate's wall time
-   before and after, and the doc moves with it. Kept on train alone,
-   S2-R41's second parse at `-2` would have shipped 2.17x the encode for
-   0.0001 b/B.
+   encode, so the PR body states the trade as the session's own clock
+   around the wired-change pair (Drivers below), `measure` on the
+   champion and `delta` on the try, same options, one run each, and the
+   doc moves with it. S2-R41's second parse at `-2` is the shape: kept
+   on train alone, it would have shipped.
 4. Implement the candidate without changing its benchmark, corpus, or
    acceptance guard.
 5. Apply the required round-trip and adversarial guards, then measure through
@@ -135,10 +136,10 @@ models (S1-L6).
   never writes `bench/baseline.json`; keeper the same pair with
   `--sealed`, the two sealed kinds at `sealed_seed(CASE_SEED)`. A change
   visible only at a level or past `lz::WIDE_WINDOW` adds `--level <1-4>`
-  or `--len <bytes>` to both commands of a pair, the same on each: the
-  file records no options, so `delta` cannot tell a mismatched level or
-  length (S2-A147, S2-A148). A candidate that changes what `decode` does
-  has no try (route step 3) and takes the keeper alone.
+  or `--len <bytes>` to both commands of a pair, the same on each:
+  `delta` refuses a file `measure` wrote with other options (S2-A149). A
+  candidate that changes what `decode` does has no try (route step 3)
+  and takes the keeper alone.
 
 ## Loop
 
