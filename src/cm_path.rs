@@ -673,8 +673,8 @@ impl Calibration {
 }
 
 /// The path's model: [`Literal`]'s wire walk plus the match model and the
-/// hashed contexts under one outer logistic mixer, then [`Calibration`].
-/// Fresh per stream.
+/// hashed contexts under one outer logistic mixer, then four calibration
+/// tables. Fresh per stream.
 #[derive(Debug, Clone)]
 pub struct CmPath {
     literal: Literal,

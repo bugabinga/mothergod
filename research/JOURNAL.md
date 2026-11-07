@@ -10210,3 +10210,64 @@ record.
   untested form; S2-R11's detector read the 1 to 2 MiB band for the wide
   reach. The prize is small: S2-R41's ungated far parse moved 2 of 13
   cases, none past 0.0003 b/B. `research/progress.jsonl` it264.
+- S2-A151 | ACCEPTED | ADR-0077's live thread, the model: lpaq1's
+  calibration stage and paq8's record and sparse contexts, which the path
+  lacked. Hypothesis: calibration tables after the outer mixer and
+  contexts keyed on a detected record length and on byte columns at fixed
+  strides lower the train mean against the hybrid's real bitstream
+  without a sealed regression, most on the record and sample cases. |
+  Mechanism: a loop session (ADR-0070), each try a change to `CmPath`
+  priced through `whole_stream::case_delta_vs_real_bitstream` over
+  `baseline::cases()` at `CASE_LEN`, release build, AMD EPYC 7763 4
+  logical cores runner, main at `6562598` as champion, train mean
+  -0.239591 against the hybrid, S2-A150's keeper reproduced. Tries in
+  order, each delta against the champion it was applied to: it265 an APM
+  keyed on the bit-tree node, blended `(p + 3 a) / 4`, **-0.009852**, kept;
+  it266 a second APM keyed on the last byte and the node, averaged in,
+  **-0.005259**, kept; it267 a second mixer selected by the node, its
+  output averaged in the logit domain, +0.002501, reverted, because 256
+  weight sets learn too slowly at `CASE_LEN` and halve the match-selected
+  mixer's weight (`json_records` +0.011939); it268 the counter limit 1023
+  to 255, +0.000305, reverted; it269 a sparse context of bytes 3 and 2
+  back, **-0.003777**, kept; it270 bytes 2 and 4 back, **-0.025355**, kept,
+  `interleaved_audio16` -0.250889; it271 the mixer step 0.005 to 0.0035,
+  +0.001245, reverted; it272 the step to 0.007, **-0.000427**, kept by the
+  loop's rule with 8 of 11 cases rising; it273 bytes 4 and 8 back,
+  **-0.005889**, kept; it274 a third APM keyed on 8 bits of the order-2 hash,
+  **-0.000194**, kept, nearly all of it the iid `entropy_ladder_h8`; it275
+  paq8's record model, a length from three equal gaps between repeats of
+  one byte value, keyed with one record above and the last byte,
+  **-0.015947**, kept, `sqlite_like_records` -0.118136; it276 one and two
+  records above, **-0.012005**, kept; it277 a text column context, the byte
+  above in the previous line, +0.000528, reverted, because no train case
+  has aligned lines and it collapses to order 1 (it261's redundancy);
+  it278 a fourth APM keyed on the match model's state, **-0.001921**, kept;
+  it279 and it280 the match minimum length 6 to 8 and to 5, +0.000355 and
+  +0.000090, reverted. The keeper, main plus the ten kept tries, against
+  main: train **-0.080626**, `interleaved_audio16` -0.299222,
+  `sqlite_like_records` -0.279871, `json_records` -0.131476,
+  `base64_wrapped` -0.107152, while `entropy_ladder_h8` rises 0.015767.
+  Sealed, read once through `cm_path::train_and_sealed_vs_real_bitstream`
+  at `sealed_seed(CASE_SEED)`, main read the same way on the same runner:
+  `access_log` -0.181121 to -0.260453 (**-0.079332**), `gradient_image`
+  -0.173845 to -0.235188 (**-0.061343**). The shipped code names the
+  contexts and folds the four tables into one `Calibration`, and
+  reproduces every train and sealed number above to six decimals. Whole
+  `-4` frames through `cm_path::extreme_frames_vs_real_bitstream`, same
+  runner, against main: train **-0.082065**, `access_log` -0.079360,
+  `gradient_image` -0.061280, no case growing (`entropy_ladder_h8` stays
+  stored). Decode cost through `cm_path::decode_costs_vs_hybrid`, three
+  interleaved reads each: the path 710.1 to 777.4 calibration steps per
+  byte on main, 1364.6 to 1397.8 on the keeper (**+617.0** at the
+  medians, about 80%); the hybrid's 90.6 to 105.9 both ways.
+  Worst-case decode, `cm_path::decode` on a pseudo-random 4 KiB stream
+  declaring the 16 MiB `MAX_OUTPUT_LEN`, interleaved: main 114.88 and
+  114.40 s, the keeper 205.79 and 204.13 s (**+79%**), about 65% of `Lz`'s
+  314 s at `codec::MAX_DECODED_LEN`; the keeper at 1 KiB, 512 KiB and 4 MiB
+  less 64 bytes, each declaring 4 MiB, one run each, 11,955, 12,077 and
+  12,096 ns per byte. | Verdict: **accepted**, train improvement and no
+  sealed regression, wired as `FORMAT_VERSION` 21 (ADR-0082). |
+  **Not measured:** the finals at `-4`; each try's share of the sealed
+  gain, because the per-try reads were train only; whether it272's step
+  and it274's table, the two smallest kept gains, pay on the sealed set
+  alone. `research/progress.jsonl` it265 to it280.

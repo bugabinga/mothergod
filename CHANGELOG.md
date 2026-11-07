@@ -193,12 +193,12 @@ release.
   LZ with in-DP repeat offsets and a six-expert context-mixing adaptive
   range coder, blended in the logit domain and SSE-calibrated. Zero
   runtime dependencies.
-- Bitstream format at `FORMAT_VERSION` 20, specified in
+- Bitstream format at `FORMAT_VERSION` 21, specified in
   [`docs/format/SPEC.md`](docs/format/SPEC.md). Until 1.0 a version a
   release has written is retired only after a later release that still
   reads it and writes its successor, named here, so you can re-compress
   first; from 1.0 on, no version is ever retired (ADR-0050).
-- Format versions below 20 no longer decode: no release ever wrote them, and
+- Format versions below 21 no longer decode: no release ever wrote them, and
   before the first release each version bump retires its predecessor
   (ADR-0063). Frames from a source build older than this one must be
   re-compressed.
@@ -227,6 +227,15 @@ release.
 
 ### Changed
 
+- cli, library: `-4` writes smaller context-mixing frames on records,
+  sampled audio and text, because its model also reads the bytes a record
+  above, sparse byte columns and four calibration tables: 0.082 bits/byte
+  smaller on average over `bench/`'s 11 synthetic training cases and 0.061
+  to 0.079 on the two held-out ones, and no case grows. Decoding such a
+  frame takes about 80% longer.
+  `-1` to `-3` write what they wrote. A file an earlier build wrote no
+  longer decodes and must be re-compressed. `FORMAT_VERSION` 20 to 21,
+  ADR-0082 (#PR).
 - cli, library: `-4` writes smaller context-mixing frames on text and
   structured data, because its model also reads order 2, the current word
   and the word before it: 0.011 bits/byte smaller on average over `bench/`'s
