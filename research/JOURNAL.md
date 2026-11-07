@@ -10271,3 +10271,90 @@ record.
   gain, because the per-try reads were train only; whether it272's step
   and it274's table, the two smallest kept gains, pay on the sealed set
   alone. `research/progress.jsonl` it265 to it280.
+- S2-A152 | ACCEPTED | ADR-0077's live thread, the model: paq8l's
+  indirect and record-position contexts, its linear-domain and bias
+  inputs, and its mixer selection by context depth, which the path lacked.
+  Hypothesis: contexts of what followed the last bytes' earlier
+  occurrences and of the position within a record, each context fed twice
+  to a mixer whose weights are chosen by how long a context the hashed
+  orders hold, lower the train mean against the hybrid's real bitstream
+  without a sealed regression, most on the record and sample cases. |
+  Mechanism: a loop session (ADR-0070), each try a change to `CmPath`
+  priced through `whole_stream::case_delta_vs_real_bitstream` over
+  `baseline::cases()` at `CASE_LEN`, release build, AMD EPYC 9V45 4
+  logical cores runner, main at `0804a33` as champion, train mean
+  -0.320217 against the hybrid, S2-A151's keeper reproduced. Tries in
+  order, each delta against the champion it was applied to: it281
+  paq8l's indirect contexts, the last byte and the last two bytes each
+  with the two bytes that followed their last two occurrences,
+  **-0.003537**, kept; it282 a constant bias input, **-0.000593**, kept;
+  it283 hashed order 8, **-0.000160**, kept; it284 each context fed again
+  as `2 (p - 1/2)`, paq8's linear-domain input, **-0.001170**, kept; it285
+  a second match model with a 24-byte minimum, -0.0000001, below the
+  records' six-decimal resolution and counted as no fall, reverted; no
+  case moved past 0.00016, consistent with the long model predicting what
+  the 6-byte one does at `CASE_LEN`, which was not read; it286 and it287 the linear scale 2 to 4 and to 1,
+  +0.000672 and +0.000560, reverted; it288 a sparse context of the last
+  four bytes' high nibbles (paq8l), **-0.000686**, kept; it289 bytes 1
+  and 3 back, +0.000364, reverted, `interleaved_audio16` +0.001331 and
+  `entropy_ladder_h6` +0.001066 outweighing small falls on four cases; it290 weight sets also selected by the
+  longest order whose slot has learned, **-0.000769**, kept,
+  `sqlite_like_records` -0.020; it291 the 21 length buckets in that
+  selector coarsened to three match classes, **-0.000340**, kept, 21 sets
+  per nibble half in place of 147; it292 a fifth
+  calibration table keyed on that order, **-0.000266**, kept; it293 the
+  indirect context for the last three bytes, hashed, **-0.000238**, kept;
+  it294 the position within a record with one record above,
+  **-0.003479**, kept, `interleaved_audio16` -0.019, `sqlite_like_records`
+  -0.021; it295 that position with the last byte, +0.000405, reverted;
+  it296 the position alone, **-0.000240**, kept; it297 the mixer step
+  0.007 to 0.005, **-0.000485**, kept, the input count having about
+  doubled; it298 the step to 0.004, +0.000424, reverted; it299 paq8l's
+  distance model, the distances to the last zero, space and newline with
+  the last byte, +0.000047, reverted, small rises spread over nine cases,
+  most on `entropy_ladder_h2` and `markov_h8_2_trap`, an input with
+  little to say costing its learning noise; it300 digits counted as
+  letters in words, +0.000190, reverted, `json_records` +0.001486 and
+  `base64_wrapped` +0.000439, the two cases whose letter runs meet digits,
+  which then join the word and its pair; it301 the position with one and two records above,
+  **-0.001095**, kept; it302 dropping S2-A151's record column now that
+  it301 keys the same bytes by position, +0.000863, reverted,
+  `json_records` +0.004970 and `base64_wrapped` +0.004849, whose rows are
+  not fixed width, so a position counted from the stream's start drifts
+  where the bytes a record above do not (inferred, not isolated). The
+  keeper,
+  main plus the thirteen kept tries, against main: train **-0.013058**,
+  `sqlite_like_records` -0.072961, `json_records` -0.027382,
+  `interleaved_audio16` -0.020995, `base64_wrapped` -0.013434,
+  `x86_dense_code` -0.007000, while `entropy_ladder_h8` rises 0.004802,
+  `entropy_ladder_h1` 0.000510, `markov_h8_2_trap` 0.000249 and
+  `entropy_ladder_h2` 0.000181. Sealed, read once through
+  `cm_path::train_and_sealed_vs_real_bitstream` at
+  `sealed_seed(CASE_SEED)`, main read the same way on the same runner:
+  `access_log` -0.260453 to -0.313554 (**-0.053101**), `gradient_image`
+  -0.235188 to -0.310263 (**-0.075075**). The shipped code names the
+  contexts, folds the indirect state into one `Indirect` and the column
+  into `Records::column`, and reproduces the keeper's train mean to nine
+  decimals. Whole `-4` frames through
+  `cm_path::extreme_frames_vs_real_bitstream`, same runner, against main:
+  train **-0.013513**, `access_log` -0.052880, `gradient_image`
+  -0.075200; `entropy_ladder_h1`'s frame grows 4 bytes,
+  `entropy_ladder_h2`'s and `markov_h8_2_trap`'s 1 each, and the
+  3,000-byte `extreme-delta-samples` golden input 14 (2427 to 2441), the
+  warm-up S1-L4 predicts for more inputs on less data. Decode cost
+  through `cm_path::decode_costs_vs_hybrid`, three interleaved reads
+  each: the path 1478.0 to 1553.7 calibration steps per byte on main,
+  1922.7 to 2068.0 on the keeper (**+450.1** at the medians, about 29%);
+  the hybrid's 109.8 to 116.2 both ways. Worst-case decode,
+  `cm_path::decode` on a pseudo-random 4 KiB stream declaring the 16 MiB
+  `MAX_OUTPUT_LEN`, same runner, interleaved: main 143.32 and 136.31 s,
+  the keeper 180.90 and 174.71 s (**+27%**); the keeper at 1 KiB, 512 KiB
+  and 4 MiB less 64 bytes, each declaring 4 MiB, one run each, 10,692,
+  10,868 and 10,600 ns per byte. S2-A151's 205 s on an EPYC 7763 scales
+  to about 260 s there, about 83% of `Lz`'s 314 s, an estimate across
+  runners and builds. | Verdict: **accepted**, train improvement and no
+  sealed regression, wired as `FORMAT_VERSION` 22 (ADR-0083).
+  | **Not measured:** the finals at `-4`; each try's share of the sealed gain,
+  because the per-try reads were train only; `Lz`'s worst case on this
+  runner, so the 83% is a cross-runner estimate. `research/progress.jsonl`
+  it281 to it302.

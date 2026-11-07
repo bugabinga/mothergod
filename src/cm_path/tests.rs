@@ -31,8 +31,11 @@ fn round_trips(data: &[u8]) {
     assert_eq!(decode(&stream, len, MAX_DECODED_LEN).as_deref(), Ok(data));
 }
 
+/// A fresh mixer weighs the wire model 1 and every other input 0, so the
+/// first decision codes at the wire model's probability. Only the first:
+/// the bias input is never 0, so its weight learns from the first bit on.
 #[test]
-fn a_fresh_model_codes_the_first_byte_at_the_wire_models_probabilities() {
+fn a_fresh_model_codes_the_first_decision_at_the_wire_models_probability() {
     let byte = b'q';
     let mut wire = Literal::new();
     let mut wire_mixer = SurpriseLogisticMix::new();
@@ -45,12 +48,12 @@ fn a_fresh_model_codes_the_first_byte_at_the_wire_models_probabilities() {
     let p = probabilities(&mut CmPath::new(), &[byte]);
 
     assert_eq!(p.len(), wire_p.len());
-    for (p, wire_p) in p.iter().zip(&wire_p) {
-        assert!(
-            (p - wire_p).abs() < 1e-12,
-            "weight 1 on the wire model, 0 elsewhere: {p} vs {wire_p}"
-        );
-    }
+    assert!(
+        (p[0] - wire_p[0]).abs() < 1e-12,
+        "weight 1 on the wire model, 0 elsewhere: {} vs {}",
+        p[0],
+        wire_p[0]
+    );
 }
 
 #[test]
@@ -294,6 +297,19 @@ fn length_buckets_are_monotone_and_in_range() {
     }
 }
 
+/// Every length bucket maps into the mixer's [`MATCH_CLASSES`], none,
+/// short or long, at the boundary the doc names.
+#[test]
+fn match_classes_split_none_short_and_long() {
+    let classes: Vec<usize> = (0..LENGTH_BUCKETS).map(match_class).collect();
+    assert!(classes.windows(2).all(|w| w[0] <= w[1]));
+    assert!(classes.iter().all(|&c| c < MATCH_CLASSES));
+    assert_eq!(
+        [0, 1, 15, 16, LENGTH_BUCKETS - 1].map(match_class),
+        [0, 1, 1, 2, 2]
+    );
+}
+
 #[test]
 fn a_check_is_the_hashs_top_sixteen_bits() {
     assert_eq!(check_of(0xabcd_0000_0000_1234), 0xabcd);
@@ -322,7 +338,7 @@ fn a_followed_match_grows_past_the_verify_limit() {
 /// repeat longer than the verify limit, so every input of the mixer
 /// speaks, then more noise than the order tables hold, so contexts collide
 /// and evict and the hash decides which. The journal's numbers for this path (S2-A133 to S2-A138,
-/// S2-A150, S2-A151) were
+/// S2-A150 to S2-A152) were
 /// read through this model, and the wiring slice ships the model that
 /// produced them; a change here is a new candidate, re-read on train and
 /// sealed, and this pin moves with its journal entry. Also a determinism
@@ -347,7 +363,7 @@ fn the_coded_stream_of_a_mixed_input_is_pinned() {
 
     assert_eq!(
         (stream.len(), crate::crc32::crc32(&stream)),
-        (66_647, 2_781_947_311),
+        (66_673, 3_123_352_101),
         "the model changed: re-read it as a candidate"
     );
 }
@@ -501,6 +517,95 @@ fn above_reads_whole_records_back_or_nothing() {
     assert_eq!(Records::new().above(prefix, 1), 0, "no length, no column");
 }
 
+/// The column is the predicted byte's position modulo the record length,
+/// counted from the stream's start, and `0` before any length is known.
+#[test]
+fn a_column_counts_positions_modulo_the_record_length() {
+    assert_eq!(Records::new().column(), 0);
+    assert_eq!(records_after(b"x..x..x..").column(), 0, "no length yet");
+    let prefix = b"ab-ab-ab-ab-";
+    for extra in 0..6 {
+        let records = records_after(&[prefix.as_slice(), &b"ab-ab-"[..extra]].concat());
+        assert_eq!(records.length, 3);
+        assert_eq!(records.column(), (extra % 3) as u64, "after {extra} more");
+    }
+}
+
+/// [`Indirect`] after pushing every byte of `prefix`.
+fn indirect_after(prefix: &[u8]) -> Indirect {
+    let mut indirect = Indirect::try_new().expect("constant sizes");
+    for &b in prefix {
+        indirect.push(b);
+    }
+    indirect
+}
+
+/// Each table holds the two bytes that followed its key's last two
+/// occurrences, the latest lowest, by its definition: a scan of the prefix.
+#[test]
+fn indirect_tables_hold_what_followed_each_key_by_their_definition() {
+    // No zero byte, which the state's start reads as preceding the stream.
+    let noise: Vec<u8> = random_bytes(29, 600)
+        .into_iter()
+        .map(|b| b.max(1))
+        .collect();
+    let text = [b"abcabdabcxab".as_slice(), &noise].concat();
+    let followers = |prefix: &[u8], key: &[u8]| -> u16 {
+        let n = key.len();
+        let mut after = 0u16;
+        for i in n..prefix.len() {
+            if prefix[i - n..i] == *key {
+                after = (after << 8) | u16::from(prefix[i]);
+            }
+        }
+        after
+    };
+    for end in 0..=text.len() {
+        let prefix = &text[..end];
+        let indirect = indirect_after(prefix);
+        let (one, two, three) = indirect.keys();
+        if end >= 1 {
+            assert_eq!(usize::from(prefix[end - 1]), one);
+            assert_eq!(
+                indirect.after_byte[one],
+                followers(prefix, &prefix[end - 1..])
+            );
+        }
+        if end >= 2 {
+            assert_eq!(
+                usize::from(u16::from_le_bytes([prefix[end - 1], prefix[end - 2]])),
+                two
+            );
+            assert_eq!(
+                indirect.after_pair[two],
+                followers(prefix, &prefix[end - 2..])
+            );
+        }
+        assert!(three < 1 << INDIRECT_TRIPLE_BITS);
+    }
+    let indirect = indirect_after(b"abcabdabcxab");
+    assert_eq!(
+        indirect.after_byte[usize::from(b'b')],
+        u16::from_le_bytes(*b"cd"),
+        "after b: d, then c most recently"
+    );
+}
+
+/// The triple table keys on the last three bytes alone, so two prefixes
+/// ending alike, whatever came before, read one entry.
+#[test]
+fn the_indirect_contexts_key_on_their_last_bytes_alone() {
+    let a = indirect_after(b"qqqq-xyz");
+    let b = indirect_after(b"rr-xyz");
+    assert_eq!(a.keys(), b.keys());
+    assert_ne!(a.hashes(), indirect_after(b"rr-xyw").hashes());
+    assert_eq!(
+        indirect_after(b"\xa1\xb2\xc3\xd4").high_nibbles(),
+        indirect_after(b"\x77\xaf\xbe\xcd\xdc").high_nibbles(),
+        "only the last four bytes' high nibbles count"
+    );
+}
+
 #[test]
 fn byte_back_tells_a_zero_byte_from_absence() {
     assert_eq!(byte_back(&[0], 1), 1);
@@ -511,7 +616,7 @@ fn byte_back_tells_a_zero_byte_from_absence() {
 
 /// The last row [`CmPath::walk`] can address in each [`Calibration`]
 /// table exists: node 255 under the longest match bucket predicting a one,
-/// the last byte 255, and the order-2 hash's top row.
+/// the last byte 255, the order-2 hash's top row, and the longest order.
 #[test]
 fn every_calibration_row_a_walk_can_name_is_in_its_table() {
     let mut calibration = Calibration::try_new().expect("constant sizes");
@@ -522,6 +627,7 @@ fn every_calibration_row_a_walk_can_name_is_in_its_table() {
         255 * BYTE_NODES + last_node,
         ((1 << APM_ORDER2_BITS) - 1) * BYTE_NODES + last_node,
         last_match_state * BYTE_NODES + last_node,
+        (ORDER_CLASSES - 1) * BYTE_NODES + last_node,
     ];
     let p = calibration.refine(rows, 0.3);
     assert!((PROBABILITY_FLOOR..=1.0 - PROBABILITY_FLOOR).contains(&p));
@@ -529,6 +635,33 @@ fn every_calibration_row_a_walk_can_name_is_in_its_table() {
     assert!(
         calibration.refine(rows, 0.3) > p,
         "a one moves every row up"
+    );
+}
+
+/// The seen order is the longest of the [`ORDERS`] whose slot at the node
+/// has learned, read from the buckets the nibble claimed: none on fresh
+/// tables, every order once each has learned, and only the orders whose
+/// context recurs when a new nibble keeps the short ones and changes the
+/// rest.
+#[test]
+fn the_seen_order_is_the_longest_order_that_has_learned_here() {
+    let mut contexts = Contexts::try_new().expect("constant sizes");
+    let hashes: [u64; CONTEXTS] = std::array::from_fn(|i| mix64(i as u64));
+    contexts.claim_nibble(&hashes, 1);
+    assert_eq!(contexts.longest_seen_order(1), 0);
+    contexts.update(1, true);
+    assert_eq!(contexts.longest_seen_order(1), ORDERS.len());
+    assert_eq!(contexts.longest_seen_order(2), 0, "node 2 has not learned");
+
+    let mut changed = hashes;
+    for h in &mut changed[2..] {
+        *h = mix64(!*h);
+    }
+    contexts.claim_nibble(&changed, 1);
+    assert_eq!(
+        contexts.longest_seen_order(1),
+        2,
+        "orders 2 and 3 recur, the rest are fresh"
     );
 }
 

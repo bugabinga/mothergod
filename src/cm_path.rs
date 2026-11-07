@@ -70,15 +70,17 @@ use crate::{Error, fan_out, logistic, try_filled_vec};
 
 /// The most bytes one [`crate::Method::Cm`] frame, and one [`decode`],
 /// outputs: a ceiling below [`MAX_DECODED_LEN`], because every output byte
-/// pays a full walk and none is a copy. Measured at version 21 on
-/// pseudo-random streams (release build, AMD EPYC 7763 4 logical cores):
-/// 1 KiB, 512 KiB and 4 MiB less 64 bytes, each declaring 4 MiB, 12.0 to
-/// 12.1 µs per output byte whatever the stream; 4 KiB declaring this
-/// ceiling, 204.1 and 205.8 s over two runs. The worst case is linear, and
-/// a hostile frame here costs about 65% of `Lz`'s 314 s at
-/// [`MAX_DECODED_LEN`], a figure read on an earlier build and another
-/// runner (`research/JOURNAL.md` S2-A151). It equals the block length
-/// [`crate::compress`] cuts at, so no frame this crate writes is refused.
+/// pays a full walk and none is a copy. Measured at version 22 on
+/// pseudo-random streams (release build, AMD EPYC 9V45 4 logical cores):
+/// 1 KiB, 512 KiB and 4 MiB less 64 bytes, each declaring 4 MiB, 10.6 to
+/// 10.9 µs per output byte whatever the stream; 4 KiB declaring this
+/// ceiling, 174.7 and 180.9 s over two runs, 27% over version 21 read
+/// interleaved on that runner. The worst case is linear. Version 21 read
+/// 205 s on an AMD EPYC 7763 runner, so a hostile frame here costs about
+/// 260 s there, about 83% of `Lz`'s 314 s at [`MAX_DECODED_LEN`], a figure
+/// read on an earlier build and runner (`research/JOURNAL.md` S2-A151,
+/// S2-A152). It equals the block length [`crate::compress`] cuts at, so no
+/// frame this crate writes is refused.
 pub const MAX_OUTPUT_LEN: u32 = 16 * 1024 * 1024;
 
 const _: () = assert!(
@@ -663,7 +665,8 @@ impl Records {
 /// whatever the bytes.
 #[derive(Debug, Clone)]
 struct Indirect {
-    /// The last four bytes pushed, the latest lowest, zero before the start.
+    /// The last four bytes pushed, the latest lowest, zero before the start:
+    /// a stream's first bytes are keyed as if zero bytes preceded them.
     recent: u32,
     /// Per byte value, the two bytes that followed it, the latest lowest.
     after_byte: [u16; 256],
