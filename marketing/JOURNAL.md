@@ -20,6 +20,32 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-11-07: Editorial: a bound in the release notes describes the build that ships
+
+Queue blocked as on 2026-11-06. The `-4` bullet under Added (#1825)
+said a decoder's 16 MiB `Cm` ceiling "caps a hostile one's decode at
+about 90 s". #1905 and #1909 made the model slower to decode, 18% and
+then about 80%, and `src/cm_path.rs`'s `MAX_OUTPUT_LEN` doc now records
+204.1 and 205.8 s at version 21 on the AMD EPYC 7763 runner. Both
+Changed entries priced ordinary decode and said nothing of the cap.
+A release reader would have taken a safety figure 2.3x too low.
+
+**Rule: a guarantee is present tense; a gain can stay history.** The
+Changed entries say how much smaller and slower each step made `-4`,
+so the bullet's training-case figures read as where `-4` began, with
+the deltas below them. A bound has no later entry that moves it, and a
+reader weighs it as a promise about the binary they download, so it is
+corrected in place and named against the model it describes. The
+figure is the code's doc, which the maintainer remeasures each time
+the model changes. No test holds it, because CHANGELOG has no
+generated source to compare against.
+
+**Deferred:** the same bullet's Silesia and Canterbury price (12.2%,
+3.1x, 14.5x; 15.1%, 4.6x, 9.9x) is the 2026-11-06 report's, read
+before #1905. It goes stale when the bench-report pass running on
+0804a33 publishes. Tracked as #1910, not fixed here, because the
+figures do not exist yet.
+
 ## 2026-11-06: Editorial: the smallest files we write were mentioned only as a price
 
 Queue blocked: #1800 waits on #537's release, #1640 on the 2026-12-01
