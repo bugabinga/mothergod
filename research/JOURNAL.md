@@ -10453,3 +10453,38 @@ record.
   runner (EPYC 9V74), whose bar reads 34.4 MB/s against 2.447;
   multi-worker decode; Canterbury; whether (3)'s cuts compose to the
   sum of their shares. `research/progress.jsonl` it304.
+- S2-A154 | ACCEPTED | Charter #1922's measurement, the capability its
+  pricing lacked (issue #1930): S2-R43's stage table from one command,
+  `cargo run -p mothergod-bench --release --bin decode_profile --
+  <file>...`, after `sudo sysctl kernel.perf_event_paranoid=1` on a hosted
+  runner. S2-R43 came from `perf record` typed once and a symbol-to-stage
+  split done by hand after inlining, and its review could not re-run it.
+  | Mechanism: the bin builds the CLI with line tables only into
+  `target/profile`, compresses each file at `-3`, decodes it under `perf
+  record -g -F 999` pinned to the last CPU, and fails on a decode that
+  differs from its file. `mothergod_bench::decode_profile` reads `perf
+  script --inline`: each sample goes to the first stage a rule names
+  along its leaf's inline chain, innermost first, so `ln` inlined into
+  `stretch` lands in `locate` or `logistic_mix_node` by its caller, and
+  `expert_prefix_sums` separates from the rest of `decode_logit_sse`.
+  Seconds are `task-clock` periods, CPU time. A test holds every rule to
+  a function defined in `src/`, so a rename fails CI rather than moving
+  time to `rest`. Two departures from S2-R43's hand split: out-of-line
+  `floor`, `round` and `fma` are one `libm` row, because a release build
+  has no frame pointers and the caller past the leaf is unreliable; libc
+  and kernel time are separate rows. | Measured, main at `5e0b369`,
+  version 22, AMD EPYC 7763, CPU 3, perf 7.0.14, nine Silesia files at
+  the `bench/corpus.toml` pins (all but mozilla, samba and webster, held
+  out for the session's time cap), 97,652,997 bytes, every decode equal,
+  38,486 samples, 38.52 CPU s: `locate` 19.8%, `logistic_mix_node`
+  24.6%, `expert_prefix_sums` 13.8%, walk 7.0%, `decode_bit` 3.7%,
+  literal rest 6.5%, libm 5.6%, `Model::decode` and the token loop 3.1%,
+  offset bits 3.5%, copy 2.3%, libc 6.9%, kernel 0.6%, rest 2.6%. The
+  same top three stages as S2-R43, mix ahead of SSE here where SSE led
+  there; SSE plus prefix, the bound on #1928's win, reads 33.6% against
+  39.2%, without the `floor` calls S2-R43 counted in SSE. | Verdict:
+  **accepted** (`kind: "patch"`, null deltas), the capability tests
+  passing. | **Not measured:** all 12 files in one run (about 25 minutes
+  on this runner); the per-byte-class split and LLVM's loop-vectorize
+  remarks, #1930's other two outputs; a second run or CPU.
+  `research/progress.jsonl` it305.
