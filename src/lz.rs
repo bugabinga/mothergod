@@ -796,6 +796,13 @@ const SHORT_MATCH_MAX_DISTANCE: u32 = 4096;
 /// unpriced merely for falling between two breakpoints.
 const LENGTH_STEPS: [u32; 13] = [4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 63];
 
+/// The [`LENGTH_STEPS`] entries at or under `len`, ascending.
+fn steps_through(len: u32) -> impl Iterator<Item = u32> {
+    LENGTH_STEPS
+        .into_iter()
+        .take_while(move |&step| step <= len)
+}
+
 /// Match length below which [`DpState::relax_match_candidate`] prices every
 /// [`LENGTH_STEPS`] entry for a fresh match; at or above it, only the full
 /// length.
@@ -1070,12 +1077,7 @@ impl DpState {
 
             let rep_len = to_u32(rep_len);
             relax_len(MIN_REP_LEN);
-            for &len in &LENGTH_STEPS {
-                if len > rep_len {
-                    break;
-                }
-                relax_len(len);
-            }
+            steps_through(rep_len).for_each(&mut relax_len);
             if !LENGTH_STEPS.contains(&rep_len) && rep_len > MIN_REP_LEN {
                 relax_len(rep_len);
             }
@@ -1123,12 +1125,7 @@ impl DpState {
         }
         let full_len = to_u32(match_len_here);
         if match_len_here < STEPPED_LEN_LIMIT {
-            for &len in &LENGTH_STEPS {
-                if len > full_len {
-                    break;
-                }
-                relax_len(len);
-            }
+            steps_through(full_len).for_each(&mut relax_len);
         }
         relax_len(full_len);
     }
