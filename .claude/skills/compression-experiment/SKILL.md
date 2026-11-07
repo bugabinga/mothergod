@@ -64,6 +64,13 @@ When measurement is possible:
    An idea made of cheap tries runs the loop below.
    A try that changes what `decode` does is one candidate, steps 4 to 8
    once, with `decode_cost_delta`.
+   A try that makes a level's doc false (`Level`, `src/lib.rs`) is a
+   level change, one candidate, steps 4 to 8 once: no gate watches
+   encode, so the PR body states the trade as the session's own clock
+   around the wired-change pair (Drivers below), `measure` on the
+   champion and `delta` on the try, same options, one run each, and the
+   doc moves with it. S2-R41's second parse at `-2` is the shape: kept
+   on train alone, it would have shipped.
 4. Implement the candidate without changing its benchmark, corpus, or
    acceptance guard.
 5. Apply the required round-trip and adversarial guards, then measure through
