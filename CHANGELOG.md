@@ -235,7 +235,7 @@ release.
   frame takes about 80% longer.
   `-1` to `-3` write what they wrote. A file an earlier build wrote no
   longer decodes and must be re-compressed. `FORMAT_VERSION` 20 to 21,
-  ADR-0082 (#PR).
+  ADR-0082 (#1909).
 - cli, library: `-4` writes smaller context-mixing frames on text and
   structured data, because its model also reads order 2, the current word
   and the word before it: 0.011 bits/byte smaller on average over `bench/`'s
