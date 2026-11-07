@@ -193,12 +193,12 @@ release.
   LZ with in-DP repeat offsets and a six-expert context-mixing adaptive
   range coder, blended in the logit domain and SSE-calibrated. Zero
   runtime dependencies.
-- Bitstream format at `FORMAT_VERSION` 19, specified in
+- Bitstream format at `FORMAT_VERSION` 20, specified in
   [`docs/format/SPEC.md`](docs/format/SPEC.md). Until 1.0 a version a
   release has written is retired only after a later release that still
   reads it and writes its successor, named here, so you can re-compress
   first; from 1.0 on, no version is ever retired (ADR-0050).
-- Format versions below 19 no longer decode: no release ever wrote them, and
+- Format versions below 20 no longer decode: no release ever wrote them, and
   before the first release each version bump retires its predecessor
   (ADR-0063). Frames from a source build older than this one must be
   re-compressed.
@@ -227,6 +227,14 @@ release.
 
 ### Changed
 
+- cli, library: `-4` writes smaller context-mixing frames on text and
+  structured data, because its model also reads order 2, the current word
+  and the word before it: 0.011 bits/byte smaller on average over `bench/`'s
+  11 synthetic training cases, up to 0.050 on `json_records`, and 0.026 on
+  both held-out ones. Decoding such a frame takes about 18% longer.
+  `-1` to `-3` write what they wrote. A file an earlier build wrote no
+  longer decodes and must be re-compressed. `FORMAT_VERSION` 19 to 20,
+  ADR-0081 (#1905).
 - encode: input between 2 and 16 MiB on two or more cores runs the 16 MiB
   reach trial beside the 2 MiB one instead of after it, so Silesia `dickens`
   compresses 14% to 15% faster (62 s to 53 s, 58 s to 50 s) and the first

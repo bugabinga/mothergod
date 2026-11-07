@@ -1,4 +1,4 @@
-# mothergod bitstream format (FORMAT_VERSION 19)
+# mothergod bitstream format (FORMAT_VERSION 20)
 
 Status: **normative, versioned** (ADR-0050). This document describes the
 current code; code and spec change in the same PR, and evolution adds a
@@ -16,7 +16,7 @@ first version a 1.0 build writes, no version is ever retired.
 ```
 offset  size  field
 0       4     magic: 0x4D 0x47 0x44 0x43 ("MGDC")
-4       1     format version (currently 19)
+4       1     format version (currently 20)
 5       1     method byte
 6       ...   payload (method-defined)
 end-4   4     check value: CRC-32 of every byte before it, u32 LE
@@ -44,7 +44,8 @@ the base64 filter and derived a frame's output length from its filtered
 length (ADR-0071); 15 added the reverse filter (ADR-0072); 16 added
 reverse then delta (ADR-0073); 17 declared the match reach in the selector
 (ADR-0075); 18 added the far reach, a 2-bit reach field with an offset
-alphabet of its own (ADR-0078); 19 added the `Cm` method (ADR-0079).
+alphabet of its own (ADR-0078); 19 added the `Cm` method (ADR-0079); 20
+gave its model order 2 and two word contexts (ADR-0081).
 
 ## Check value (ADR-0068)
 
@@ -241,13 +242,15 @@ repeat-offset cache to reuse) is coded as a symbol through the separate
 never be misread as an offset bucket or vice versa — the shape of the
 founding port bug this section's invariant exists to rule out.
 
-### `Cm` (`src/cm_path.rs`, ADR-0079)
+### `Cm` (`src/cm_path.rs`, ADR-0079, ADR-0081)
 
 A trial-selected filter, from the same shortlist and with the same meaning
 as `Lz`'s, applied to the frame data, then every filtered byte coded as 8
 binary decisions through one context-mixing model (`cm_path::CmPath`): the
-`Lz` literal model's own probability, a match model's and four hashed order
-contexts' (orders 3 to 6), blended by a logistic mixer and coded over the
+`Lz` literal model's own probability, a match model's and seven hashed
+contexts': orders 2 to 6, the current word with the byte before it, and the
+previous word with the current one, where a word is a run of ASCII letters
+taken case folded. They are blended by a logistic mixer and coded over the
 same adaptive range coder. Every table has a constant size and starts fresh
 per frame. Every value is computed with IEEE basic operations and the codec's
 own `stretch` and `squash`, never a libm call (ADR-0024).
