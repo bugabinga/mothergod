@@ -129,8 +129,9 @@ fn decode_rejects_a_length_over_its_bound_before_any_work() {
 
 /// A caller's bound past [`MAX_OUTPUT_LEN`] buys it nothing: issue
 /// #1808's `u32::MAX` would otherwise reach 4 GiB of output and work, and
-/// [`MAX_DECODED_LEN`] about 1,400 s of it. The ceiling itself is admitted,
-/// so the empty stream falls to the floor instead.
+/// [`MAX_DECODED_LEN`] 16 times the ceiling's measured worst case. The
+/// ceiling itself is admitted, so the empty stream falls to the floor
+/// instead.
 #[test]
 fn decode_caps_a_callers_bound_at_the_output_ceiling() {
     for bound in [MAX_DECODED_LEN, u32::MAX] {
@@ -286,7 +287,8 @@ fn a_followed_match_grows_past_the_verify_limit() {
 /// The coded stream of one mixed input, pinned: text, noise, a run and a
 /// repeat longer than the verify limit, so every input of the mixer
 /// speaks, then more noise than the order tables hold, so contexts collide
-/// and evict and the hash decides which. The journal's numbers for this path (S2-A133 to S2-A138) were
+/// and evict and the hash decides which. The journal's numbers for this path (S2-A133 to S2-A138,
+/// S2-A150) were
 /// read through this model, and the wiring slice ships the model that
 /// produced them; a change here is a new candidate, re-read on train and
 /// sealed, and this pin moves with its journal entry. Also a determinism
@@ -311,8 +313,114 @@ fn the_coded_stream_of_a_mixed_input_is_pinned() {
 
     assert_eq!(
         (stream.len(), crate::crc32::crc32(&stream)),
-        (66_491, 2_313_715_878),
+        (66_532, 772_251_629),
         "the model changed: re-read it as a candidate"
+    );
+}
+
+/// [`Words::word`] by its definition, scanning `prefix` back: the letters
+/// since the last non-letter, after that non-letter when one exists.
+fn word_by_scan(prefix: &[u8]) -> u64 {
+    let start = prefix
+        .iter()
+        .rposition(|b| !b.is_ascii_alphabetic())
+        .unwrap_or(0);
+    prefix[start..].iter().fold(mix64(WORD_SEED), |h, b| {
+        mix64(h ^ u64::from(b.to_ascii_lowercase()))
+    })
+}
+
+/// [`Words::bigram`] by its definition: the last letter run before the
+/// current one, a space, then the current run.
+fn bigram_by_scan(prefix: &[u8]) -> u64 {
+    let letters_end = |end: usize| {
+        prefix[..end]
+            .iter()
+            .rposition(|b| !b.is_ascii_alphabetic())
+            .map_or(0, |i| i + 1)
+    };
+    let current = letters_end(prefix.len());
+    let gap = prefix[..current]
+        .iter()
+        .rposition(u8::is_ascii_alphabetic)
+        .map_or(0, |i| i + 1);
+    let previous = letters_end(gap);
+    prefix[previous..gap]
+        .iter()
+        .chain(b" ")
+        .chain(&prefix[current..])
+        .fold(mix64(BIGRAM_SEED), |h, b| {
+            mix64(h ^ u64::from(b.to_ascii_lowercase()))
+        })
+}
+
+/// [`Words`] after pushing every byte of `prefix`.
+fn words_after(prefix: &[u8]) -> Words {
+    let mut words = Words::new();
+    for &b in prefix {
+        words.push(b);
+    }
+    words
+}
+
+/// The one-byte-at-a-time state is its definition at every prefix, so a
+/// walk's cost does not grow with a word's length (hard rule 2: a run of
+/// letters the length of a frame must not make decode quadratic).
+#[test]
+fn words_pushed_a_byte_at_a_time_equal_their_definition_at_every_prefix() {
+    let text = b"Ab cd,  EF.gh\n12ij kl--MN op qrstuvwxyz \x00\xffzz"
+        .iter()
+        .copied()
+        .chain(
+            random_bytes(23, 400)
+                .iter()
+                .map(|b| b"aZ .9"[usize::from(*b) % 5]),
+        )
+        .collect::<Vec<u8>>();
+    let mut words = Words::new();
+    for end in 0..=text.len() {
+        let prefix = &text[..end];
+        assert_eq!(words.word, word_by_scan(prefix), "word after {end} bytes");
+        assert_eq!(
+            words.bigram,
+            bigram_by_scan(prefix),
+            "bigram after {end} bytes"
+        );
+        if let Some(&b) = text.get(end) {
+            words.push(b);
+        }
+    }
+}
+
+#[test]
+fn the_word_context_folds_case_and_keys_on_the_byte_before() {
+    assert_eq!(words_after(b"x Cat").word, words_after(b"x cAT").word);
+    assert_ne!(words_after(b"x cat").word, words_after(b"-cat").word);
+    assert_eq!(
+        words_after(b"one.").word,
+        words_after(b"two.").word,
+        "a non-letter starts a fresh word"
+    );
+}
+
+#[test]
+fn the_word_pair_skips_the_gap_and_forgets_the_word_before_the_pair() {
+    assert_eq!(
+        words_after(b"the, cat").bigram,
+        words_after(b"THE cat").bigram
+    );
+    assert_eq!(
+        words_after(b"a the cat").bigram,
+        words_after(b"b the cat").bigram
+    );
+    assert_ne!(
+        words_after(b"the cat").bigram,
+        words_after(b"dog cat").bigram
+    );
+    assert_eq!(
+        words_after(b"the cat ").bigram,
+        words_after(b"cat:").bigram,
+        "once a word ends it is the previous one, the current empty"
     );
 }
 

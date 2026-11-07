@@ -57,14 +57,14 @@ pub const MAGIC: [u8; 4] = *b"MGDC";
 /// Every bump is a bitstream format change (CLAUDE.md hard rule 5); the
 /// history of what each version changed lives in `docs/format/SPEC.md` and
 /// the ADRs it cites. This build decodes exactly this version for every
-/// method: versions 1 through 18 were retired outright, no release having
+/// method: versions 1 through 19 were retired outright, no release having
 /// written any of them
 /// (`docs/adr/0050-the-decode-forever-promise-starts-at-1-0.md`,
 /// `docs/adr/0063-retire-format-versions-1-through-9.md`), and a frame
 /// naming any other version is rejected as `UnsupportedVersion` before its
 /// payload is read (`tests/golden/` pins the current version's
 /// frames).
-pub const FORMAT_VERSION: u8 = 19;
+pub const FORMAT_VERSION: u8 = 20;
 
 /// Payload encoding methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

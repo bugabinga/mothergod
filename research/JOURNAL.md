@@ -10119,3 +10119,56 @@ record.
   reach, and it failed. **Not measured:** the finals at `-2`, and
   wall time on a single-block input with the far parse on a second
   thread. `research/progress.jsonl` it257, it258.
+- S2-A150 | ACCEPTED | ADR-0077's live thread, the model: lpaq1's
+  contexts the path lacked. Hypothesis: hashed tables for a word context,
+  order 2 and a word pair, mixed beside `cm_path`'s orders 3 to 6, lower
+  the train mean against the hybrid's real bitstream without a sealed
+  regression, most on the text-shaped cases. | Mechanism: a loop session
+  (ADR-0070), each try a change to `CmPath` priced through
+  `whole_stream::case_delta_vs_real_bitstream` over `baseline::cases()` at
+  `CASE_LEN`, release build, AMD EPYC 9V45 4 logical cores runner, main at
+  `ad4c5b9` as champion, train mean -0.229311 against the hybrid. Tries in
+  order, each delta against the champion it was applied to: it259 a word
+  context, the letters since the last non-letter, case folded, after
+  that non-letter (lpaq1), **-0.003538**, kept; it260 hashed order 2,
+  **-0.003489**, kept; it261 order 1, +0.000467, reverted, because the wire
+  model already carries order 1 and the redundant input costs most where
+  nothing is predictable (`entropy_ladder_h8` +0.003130); it262 dropping
+  order 5 for lpaq1's own set, +0.000180, reverted, because order 5 carries
+  the structured cases (`json_records` +0.004204); it263 a word pair, the
+  previous word and the current one with the non-letters between skipped
+  (paq8), **-0.003253**, kept. The keeper, main plus it259, it260 and
+  it263, against main: train **-0.010280**, `json_records` -0.049766,
+  `base64_wrapped` -0.037818, `entropy_ladder_h4` -0.019706, while
+  `entropy_ladder_h8` rises 0.005264, `entropy_ladder_h1` 0.003762 and
+  `interleaved_audio16` 0.000565. Sealed, read once through
+  `cm_path::train_and_sealed_vs_real_bitstream` at
+  `sealed_seed(CASE_SEED)`, main read the same way on the same runner:
+  `access_log` -0.155078 to -0.181121 (**-0.026043**), `gradient_image`
+  -0.148004 to -0.173845 (**-0.025841**). The tries scanned each word back
+  from the prefix's end, which is quadratic on a long run of letters; the
+  shipped `Words` keeps both hashes as running state, one update per
+  byte, and reproduces every train and sealed number above to six
+  decimals. Whole `-4` frames through
+  `cm_path::extreme_frames_vs_real_bitstream`, same runner, against main:
+  train **-0.010764**, both sealed kinds -0.025920; `entropy_ladder_h1`'s
+  frame grows 24 bytes and `interleaved_audio16`'s 3, both still smaller
+  than `-3`'s. Decode cost through `cm_path::decode_costs_vs_hybrid`, three
+  interleaved reads each: the path 738.3 to 739.2 calibration steps per
+  byte on main, 871.7 to 872.8 on the keeper (**+133.7**, about 18%); the
+  hybrid's 111.4 to 112.3 both ways, and `baseline_gate check` passes with
+  `bench/baseline.json` moved by digest only. Worst-case decode,
+  `cm_path::decode` on pseudo-random streams, release build, AMD EPYC
+  7763 4 logical cores runner: 4 KiB declaring the 16 MiB
+  `MAX_OUTPUT_LEN`, main 91.36 and 91.42 s, the keeper 116.39 and
+  116.87 s, interleaved (**+27%**, more than the calibration unit's 18%
+  says); the keeper at 1 KiB, 512 KiB and 4 MiB less 64 bytes, each
+  declaring 4 MiB, one run each, 6,405, 6,783 and 6,887 ns per byte.
+  The hostile frame at the cap now costs about 37% of `Lz`'s 314 s at
+  `codec::MAX_DECODED_LEN`, a figure read on an earlier build and
+  another runner, where S2-A142 left it under a third. | Verdict: **accepted**,
+  train improvement and no sealed regression, wired as `FORMAT_VERSION`
+  20 (ADR-0081). | **Not measured:** the finals at `-4`; the word
+  contexts' share of the sealed gain against order 2's, because the
+  per-try reads were train only; a word defined past ASCII letters.
+  `research/progress.jsonl` it259 to it263.

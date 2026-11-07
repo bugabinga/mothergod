@@ -1,16 +1,20 @@
 //! A context-mixing path over every byte, no LZ tokens: charter #1763's
-//! candidate (`research/JOURNAL.md` S2-A133 to S2-A138, ADR-0077), coded
+//! candidate (`research/JOURNAL.md` S2-A133 to S2-A138, ADR-0077), its
+//! contexts widened by S2-A150 (ADR-0081), coded
 //! through the real range coder.
 //!
 //! Per bit-tree node of each byte, an outer logistic mixer blends:
 //!
 //! ```text
 //!   Literal (six experts, SurpriseLogisticMix, LogitSse) ─ p ─┐
-//!   match model: predicted byte, confirmed length ───────── p ─┤ stretch,
-//!   hashed order-3 context, per node ────────────────────── p ─┤ weighted sum,
+//!   match model: predicted byte, confirmed length ───────── p ─┤
+//!   hashed order-2 context, per node ────────────────────── p ─┤ stretch,
+//!   hashed order-3 ─────────────────────────────────────── p ─┤ weighted sum,
 //!   hashed order-4 ─────────────────────────────────────── p ─┤ squash ─> p
 //!   hashed order-5 ─────────────────────────────────────── p ─┤
-//!   hashed order-6 ─────────────────────────────────────── p ─┘
+//!   hashed order-6 ─────────────────────────────────────── p ─┤
+//!   hashed word: its letters and the byte before ───────── p ─┤
+//!   hashed word pair: the previous word's and this one's ─ p ─┘
 //! ```
 //!
 //! The first input is the shipped wire model's own refined probability,
@@ -49,12 +53,14 @@ use crate::{Error, fan_out, logistic, try_filled_vec};
 
 /// The most bytes one [`crate::Method::Cm`] frame, and one [`decode`],
 /// outputs: a ceiling below [`MAX_DECODED_LEN`], because every output byte
-/// pays a full walk and none is a copy. Measured on random streams of 1 KiB,
-/// 512 KiB and 4 MiB less 64 bytes, each declaring 4 MiB (release build,
-/// INTEL XEON PLATINUM 8573C, one run each): 5.0 to 5.4 µs per output byte
-/// whatever the stream, and one declaring this ceiling decoded in 88 s, so
-/// the worst case is linear and a hostile frame here costs under a third of
-/// `Lz`'s measured 314 s at [`MAX_DECODED_LEN`]. It equals the block length
+/// pays a full walk and none is a copy. Measured at version 20 on
+/// pseudo-random streams (release build, AMD EPYC 7763 4 logical cores):
+/// 1 KiB, 512 KiB and 4 MiB less 64 bytes, each declaring 4 MiB, 6.4 to
+/// 6.9 µs per output byte whatever the stream; 4 KiB declaring this
+/// ceiling, 116.4 and 116.9 s over two runs. The worst case is linear, and
+/// a hostile frame here costs about 37% of `Lz`'s 314 s at
+/// [`MAX_DECODED_LEN`], a figure read on an earlier build and another
+/// runner (`research/JOURNAL.md` S2-A150). It equals the block length
 /// [`crate::compress`] cuts at, so no frame this crate writes is refused.
 pub const MAX_OUTPUT_LEN: u32 = 16 * 1024 * 1024;
 
@@ -95,8 +101,11 @@ const MIXER_RATE: f64 = 0.005;
 /// here, so a slot's adaptation slows to this floor and no further.
 const COUNTER_LIMIT: u16 = 1023;
 
-/// The hashed context orders, each one input, in mixer order.
-const ORDERS: [usize; 4] = [3, 4, 5, 6];
+/// The hashed context orders, each one input, in mixer order. Order 1
+/// is the wire model's own, and a table of it priced worse; dropping
+/// order 5, lpaq1's set, priced worse on the structured cases
+/// (`research/JOURNAL.md` S2-A150).
+const ORDERS: [usize; 5] = [2, 3, 4, 5, 6];
 
 /// [`Bucket`]s per order table, as a power of two, the size the train
 /// mean picked at `CASE_LEN` (`research/JOURNAL.md` S2-A138). Under
@@ -138,8 +147,13 @@ const LENGTH_BUCKETS: usize = 21;
 /// whether the node is in the byte's high or low nibble.
 const WEIGHT_SETS: usize = LENGTH_BUCKETS * 2;
 
-/// Inputs to the outer mixer: the wire model, the match model, the orders.
-const INPUTS: usize = 2 + ORDERS.len();
+/// Inputs to the outer mixer: the wire model, the match model, the
+/// hashed contexts.
+const INPUTS: usize = 2 + CONTEXTS;
+
+/// Hashed context tables, in mixer order: the [`ORDERS`], then the word
+/// and the word pair, [`Words`].
+const CONTEXTS: usize = ORDERS.len() + 2;
 
 fn clamp(p: f64) -> f64 {
     p.clamp(PROBABILITY_FLOOR, 1.0 - PROBABILITY_FLOOR)
@@ -404,32 +418,91 @@ impl MatchModel {
     }
 }
 
-/// The hashed orders: one [`Bucket`] table per [`ORDERS`] entry, and the
-/// bucket each currently owns for the nibble being walked.
-#[derive(Debug, Clone)]
-struct Orders {
-    tables: Vec<Vec<Bucket>>,
-    claimed: [usize; ORDERS.len()],
+/// Seed of [`Words::word`]'s fold.
+const WORD_SEED: u64 = 0x776f_7264;
+
+/// Seed of [`Words::bigram`]'s fold.
+const BIGRAM_SEED: u64 = 0x6269_6772_616d;
+
+/// The two text contexts (`research/JOURNAL.md` S2-A150), each a
+/// [`mix64`] fold over bytes, ASCII case folded, kept up to date one byte
+/// at a time so a walk costs the same however long a word runs. A word is
+/// a maximal run of ASCII letters.
+///
+/// Invariant: [`Self::push`] has seen every byte of the prefix in order,
+/// once, which [`CmPath::walk`]'s one call per byte provides, the contract
+/// [`MatchModel`] already holds it to.
+#[derive(Debug, Clone, Copy)]
+struct Words {
+    /// lpaq1's word context: the letters of the current word, after the
+    /// byte before it when one exists, folded from `WORD_SEED`.
+    word: u64,
+    /// The previous word's letters, a space, then the current word's,
+    /// folded from `BIGRAM_SEED`; the non-letters between them are skipped.
+    bigram: u64,
+    /// The current word's letters alone, folded from `BIGRAM_SEED`: the
+    /// previous word once a non-letter ends it.
+    current: u64,
+    /// Whether the last byte pushed was a letter.
+    in_word: bool,
 }
 
-impl Orders {
+impl Words {
+    fn new() -> Self {
+        let current = mix64(BIGRAM_SEED);
+        Self {
+            word: mix64(WORD_SEED),
+            bigram: mix64(current ^ u64::from(b' ')),
+            current,
+            in_word: false,
+        }
+    }
+
+    /// Folds in the prefix's next byte.
+    fn push(&mut self, byte: u8) {
+        if byte.is_ascii_alphabetic() {
+            let letter = u64::from(byte.to_ascii_lowercase());
+            self.word = mix64(self.word ^ letter);
+            self.bigram = mix64(self.bigram ^ letter);
+            self.current = mix64(self.current ^ letter);
+        } else {
+            self.word = mix64(mix64(WORD_SEED) ^ u64::from(byte));
+            if self.in_word {
+                self.bigram = mix64(self.current ^ u64::from(b' '));
+                self.current = mix64(BIGRAM_SEED);
+            }
+        }
+        self.in_word = byte.is_ascii_alphabetic();
+    }
+}
+
+/// The hashed contexts: one [`Bucket`] table per [`ORDERS`] entry, then
+/// [`Words::word`]'s and [`Words::bigram`]'s, and the bucket each currently
+/// owns for the nibble being walked.
+#[derive(Debug, Clone)]
+struct Contexts {
+    tables: Vec<Vec<Bucket>>,
+    claimed: [usize; CONTEXTS],
+}
+
+impl Contexts {
     fn try_new() -> Result<Self, std::collections::TryReserveError> {
         let mut tables = Vec::new();
-        tables.try_reserve_exact(ORDERS.len())?;
-        for _ in ORDERS {
+        tables.try_reserve_exact(CONTEXTS)?;
+        for _ in 0..CONTEXTS {
             tables.push(try_filled_vec(1 << ORDER_BUCKET_BITS, Bucket::FRESH)?);
         }
         Ok(Self {
             tables,
-            claimed: [0; ORDERS.len()],
+            claimed: [0; CONTEXTS],
         })
     }
 
-    /// [`claim`]s each order's bucket for the nibble rooted at `node`, from
+    /// [`claim`]s each context's bucket for the nibble rooted at `node`, from
     /// the byte's context `hashes`. A nibble starts at node 1 or at 16 to
     /// 31, which names the high nibble, so the low nibble's buckets key on
     /// it.
-    fn claim_nibble(&mut self, hashes: &[u64; ORDERS.len()], node: usize) {
+    fn claim_nibble(&mut self, hashes: &[u64; CONTEXTS], node: usize) {
         let nibble_key = (node as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
         for ((claimed, &h), table) in self.claimed.iter_mut().zip(hashes).zip(&mut self.tables) {
             let h = mix64(h ^ nibble_key);
@@ -437,10 +510,10 @@ impl Orders {
         }
     }
 
-    /// Each order's stretched probability at `nibble_node`.
-    fn stretches(&self, nibble_node: usize) -> [f64; ORDERS.len()] {
+    /// Each context's stretched probability at `nibble_node`.
+    fn stretches(&self, nibble_node: usize) -> [f64; CONTEXTS] {
         let i = nibble_node - 1;
-        let mut out = [0.0; ORDERS.len()];
+        let mut out = [0.0; CONTEXTS];
         for ((out, table), &b) in out.iter_mut().zip(&self.tables).zip(&self.claimed) {
             *out = stretch(table[b].slots[i].p());
         }
@@ -455,13 +528,14 @@ impl Orders {
 }
 
 /// The path's model: [`Literal`]'s wire walk plus the match model and the
-/// hashed orders under one outer logistic mixer. Fresh per stream.
+/// hashed contexts under one outer logistic mixer. Fresh per stream.
 #[derive(Debug, Clone)]
 pub struct CmPath {
     literal: Literal,
     literal_mixer: SurpriseLogisticMix,
     match_model: MatchModel,
-    orders: Orders,
+    words: Words,
+    contexts: Contexts,
     weights: Vec<[f64; INPUTS]>,
 }
 
@@ -489,7 +563,8 @@ impl CmPath {
             literal: Literal::try_new()?,
             literal_mixer: SurpriseLogisticMix::try_new()?,
             match_model: MatchModel::try_new()?,
-            orders: Orders::try_new()?,
+            words: Words::new(),
+            contexts: Contexts::try_new()?,
             weights: try_filled_vec(WEIGHT_SETS, start)?,
         })
     }
@@ -507,14 +582,21 @@ impl CmPath {
         mut code_bit: impl FnMut(usize, f64) -> bool,
     ) -> u8 {
         let predicted = self.match_model.predict(prefix);
-        let order_hashes = ORDERS
-            .map(|order| hash_bytes(order as u64, &prefix[prefix.len().saturating_sub(order)..]));
+        if let Some(&last) = prefix.last() {
+            self.words.push(last);
+        }
+        let mut hashes = [self.words.word; CONTEXTS];
+        for (h, order) in hashes.iter_mut().zip(ORDERS) {
+            *h = hash_bytes(order as u64, &prefix[prefix.len().saturating_sub(order)..]);
+        }
+        hashes[CONTEXTS - 1] = self.words.bigram;
         let Self {
             literal,
             literal_mixer,
             match_model,
-            orders,
+            contexts,
             weights,
+            ..
         } = self;
 
         let (mut lo, mut hi, mut node) = (0usize, 256usize, 1usize);
@@ -538,9 +620,9 @@ impl CmPath {
             }
 
             if nibble_node == 1 {
-                orders.claim_nibble(&order_hashes, node);
+                contexts.claim_nibble(&hashes, node);
             }
-            inputs[2..].copy_from_slice(&orders.stretches(nibble_node));
+            inputs[2..].copy_from_slice(&contexts.stretches(nibble_node));
 
             let set = bucket * 2 + usize::from(node >= NIBBLE_NODES);
             let w = &mut weights[set];
@@ -555,7 +637,7 @@ impl CmPath {
             if let Some(s) = confidence_slot {
                 match_model.confidence.update(s, bit);
             }
-            orders.update(nibble_node, bit);
+            contexts.update(nibble_node, bit);
 
             if bit {
                 lo = mid;

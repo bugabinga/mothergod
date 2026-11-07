@@ -93,7 +93,7 @@ exclude_re = [
   # mutants: 1
   "replace \\| with \\^ in Slot::update$",
 
-  # Equivalent: cm_path's INPUTS at `2 * ORDERS.len()` adds two mixer
+  # Equivalent: cm_path's INPUTS at `2 * CONTEXTS` adds mixer
   # inputs no line writes, so each stays 0, its weight starts 0, and its
   # update adds rate * error * 0: the mix and every coded bit are
   # unchanged. Pinned: the expression has no function to scope by, and
