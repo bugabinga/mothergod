@@ -64,6 +64,12 @@ When measurement is possible:
    An idea made of cheap tries runs the loop below.
    A try that changes what `decode` does is one candidate, steps 4 to 8
    once, with `decode_cost_delta`.
+   A try that makes a level's doc false (`Level`, `src/lib.rs`) is a
+   level change, one candidate, steps 4 to 8 once: no gate watches
+   encode, so the PR body states the trade as the gate's wall time
+   before and after, and the doc moves with it. Kept on train alone,
+   S2-R41's second parse at `-2` would have shipped 2.17x the encode for
+   0.0001 b/B.
 4. Implement the candidate without changing its benchmark, corpus, or
    acceptance guard.
 5. Apply the required round-trip and adversarial guards, then measure through
