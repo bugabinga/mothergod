@@ -2922,7 +2922,9 @@ record.
   records its probe and `delta` refuses another's, accepted; full record
   in S2-A149's own entry. Thirty-first slice, S2-R41: the far reach at
   `-2`, as its one parse and as a second parse kept only when smaller,
-  rejected; full record in S2-R41's own entry.
+  rejected; full record in S2-R41's own entry. Thirty-second slice,
+  S2-R42: that second parse gated on the wide parse's far-match rate,
+  rejected; full record in S2-R42's own entry.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -10172,3 +10174,39 @@ record.
   contexts' share of the sealed gain against order 2's, because the
   per-try reads were train only; a word defined past ASCII letters.
   `research/progress.jsonl` it259 to it263.
+- S2-R42 | REJECTED | Lead S1-P4, S2-R41's reopening condition: a cheap
+  predictor of a far win. Hypothesis: the rate of matches past
+  `lz::WINDOW` in `-2`'s own one-round wide parse predicts where a far
+  second parse wins, so gating S2-R41's try 2 on it keeps that try's
+  train gain at near-zero encode cost on the cases it cannot help. |
+  Mechanism: a loop session (ADR-0070), one try, it264, `baseline_gate
+  measure` and `delta` at `--level 2 --len 4000000`, release build, AMD
+  EPYC 9V45 4 logical cores runner, main at `865a489` as champion. A
+  diagnostic first, on train only: the far parse at one round beside the
+  wide one shrinks only `markov_h8_2_trap` (151 bytes) and grows the other
+  ten, by up to 1,488 bytes; the far parse at `DP_ROUNDS` shrinks 8 of 11,
+  the extra rounds and not the reach. Matches past `lz::WINDOW` per 2,048
+  bytes past it: `markov_h8_2_trap` 1.305, every losing case at or under
+  `entropy_ladder_h1`'s 0.581. The try: the far parse runs when that rate
+  exceeds 1.0, the far body kept only when strictly smaller. Train
+  **-0.000027** b/B, all of it `markov_h8_2_trap` (-0.000302), S2-R41's
+  try 2 gain in full; gate wall time 72.20 to 65.52 s, one run each,
+  because the far parse ran on one case of eleven. Sealed, read once:
+  `access_log` and `gradient_image` unchanged, mean **+0.000000**, wall
+  time 12.86 to 13.24 s. Read after the verdict, tuning nothing, the
+  sealed rates are `access_log` 0.897, where S2-R41 found the far parse
+  gains nothing, and `gradient_image` 0.008, the one sealed case it
+  shrinks: the statistic ranks them backwards. | Verdict: **rejected**;
+  the corpus policy alone would accept, train down and no sealed
+  regression. The train gain is the one point the threshold was fit to,
+  so it is not evidence, and out of sample the gate found 0 of 1 far
+  wins. Mechanism of failure: the 1 to 2 MiB band the wide parse sees
+  does not predict the 2 to 16 MiB band it cannot, because structure
+  whose recurrence lies past `lz::WIDE_WINDOW` (`gradient_image`) leaves
+  no matches inside it, and chance recurrence on a low-order source
+  (`markov_h8_2_trap`) fills both bands alike. Code deleted with the
+  verdict. | Conditions: a predictor that reads the 2 to 16 MiB band
+  itself, a sampled hash of anchors at those distances, is the
+  untested form; S2-R11's detector read the 1 to 2 MiB band for the wide
+  reach. The prize is small: S2-R41's ungated far parse moved 2 of 13
+  cases, none past 0.0003 b/B. `research/progress.jsonl` it264.
