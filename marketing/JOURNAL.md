@@ -20,6 +20,26 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-11-07: Editorial: the roadmap's head moved, and the surface said ratio
+
+#1923. ADR-0084 put M9, the default level's speed, at the top of
+`ROADMAP.md` and made release 0.1 wait on it. README and `/` still said
+closing Silesia heads the roadmap, and `/`'s caveat paragraph said the
+roadmap holds a faster decoder "until a user asks". The ask has fired.
+
+**The head moves to the speed paragraph; the bar is in words.** The
+sentence sits under the numbers that show how far the default is from
+it, so a reader measures the distance without a second figure. The
+share #1921 will print replaces nothing here until it exists; the bar
+quotes ROADMAP's definition, which is the operator's and moves only by
+ADR. The pre-alpha paragraph points at it, because "when is the
+release" is that paragraph's question and the answer was silence.
+
+**Wording: "half of `xz -9e`'s speed or better", not "at least half".**
+`experiment_floor_holds_against_research_progress_jsonl` reads every
+"at least " on the surface as the experiment floor and panics on a
+word after it. The phrase is avoided rather than the test loosened.
+
 ## 2026-11-07: Editorial: a bound in the release notes describes the build that ships
 
 Queue blocked as on 2026-11-06. The `-4` bullet under Added (#1825)

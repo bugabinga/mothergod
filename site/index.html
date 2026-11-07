@@ -220,11 +220,13 @@
         <b>Status</b>
         <p>
           <strong>Pre-alpha: no release, no packaged binary, no version
-            tag.</strong> The container format (version 22) is specified and
-          versioned, not frozen. Before the first release, each format change
-          retires the version before it, so the next build that changes the
-          format will not read a file you compress today. After that, until 1.0
-          a version can still be retired; from 1.0 on, none ever is. The
+            tag.</strong> The first release waits on the
+          <a href="#speed-bar">speed bar</a>. The container format (version 22)
+          is specified and versioned, not frozen. Before the first release, each
+          format change retires the version before it, so the next build that
+          changes the format will not read a file you compress today. After
+          that, until 1.0 a version can still be retired; from 1.0 on, none ever
+          is. The
           <a
             href="https://github.com/bugabinga/mothergod/blob/main/docs/format/SPEC.md"
           >format spec</a> states the rules. The API, the CLI and the ratio
@@ -314,10 +316,9 @@
           <code>ooffice</code> library. The widest losses are Silesia's
           <code>sao</code> star catalog, <code>mozilla</code> install archive
           and <code>mr</code> medical image, and Canterbury's
-          <code>sum</code> executable. Closing Silesia heads the
-          <a href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md"
-          >roadmap</a>, as open-ended research with no date attached. The
-          per-file tables and the throughput columns are in
+          <code>sum</code> executable. Closing Silesia is open-ended research
+          with no date attached. The per-file tables and the throughput columns
+          are in
           <a
             href="https://github.com/bugabinga/mothergod/blob/main/docs/benchmarks/canterbury.md"
           ><code>docs/benchmarks/canterbury.md</code></a> and
@@ -375,16 +376,22 @@
           twenty times faster to decode. The reports set every level of gzip,
           zstd and xz beside mothergod, peak memory included.
         </p>
+        <p id="speed-bar">
+          Speed heads the
+          <a
+            href="https://github.com/bugabinga/mothergod/blob/main/ROADMAP.md#m9-speed-adr-0084"
+          >roadmap</a>: the first release waits until the default level encodes
+          and decodes at half of <code>xz -9e</code>'s speed or better on both
+          corpora, in the same run, while still beating
+          <code>zstd -19</code> on each.
+        </p>
         <p>
           One caveat the reports state themselves: these are single-run figures
           from one machine, not a cross-machine claim. One more worth adding: an
           aggregate is total bytes over total time, so it is not a typical file.
           Per-file decode rates in those reports run from
-          <span class="rate">0.4 to 19.7 MB/s</span>. Speed is measured on every
-          benchmark run, but ratio is the target: a faster decoder means a
-          second decoding path and a format change, and the roadmap holds it
-          until a user asks. If decode speed is what keeps you from using
-          mothergod,
+          <span class="rate">0.4 to 19.7 MB/s</span>. If speed is what keeps you
+          from using mothergod,
           <a href="https://github.com/bugabinga/mothergod/issues/new/choose"
           >open an issue</a> and say so.
         </p>
