@@ -64,17 +64,19 @@ env:
 jobs:
   regenerate:
     runs-on: ubuntu-24.04
-    # The whole pass, competitor matrix (#1340) included, took 67 minutes
-    # on 2026-10-31 (run 41189714667); the runner CPU moves it by a
-    # quarter either way (JOURNAL S2-A121). The `-4` row (#1824) adds
-    # about 121 more, scaled from one 4 MiB text slice to Silesia's
-    # `-3` rates (80 encode, 41 decode), near 188 in all. 300 leaves room
-    # for Silesia's binary members pricing `-4` differently, under the
-    # hosted runner's 360-minute job limit, until a `-4` pass's wall
-    # time, read with
+    # The whole pass, competitor matrix (#1340) and the `-4` row (#1824)
+    # included, took 170, 171, 178 and 261 minutes on the four passes
+    # that finished between 2026-11-05 and 2026-11-07 (runs 41994577267,
+    # 42158371366, 42323412949, 42363043291), read with
     #   gh run list --workflow bench-report.yml --json createdAt,updatedAt
-    # replaces this sentence.
-    timeout-minutes: 300
+    # The 261 is the `-4` row at version 22 (#1912), about 190 of them,
+    # on the fast EPYC 9V74; the runner CPU moves a pass by a quarter
+    # either way (JOURNAL S2-A121), so the same pass on a slow runner is
+    # 326, past the 300 this line carried, with nothing published. 355 is
+    # the room under the hosted runner's 360-minute job limit; a pass
+    # that needs more is a measurement to cut (#1926), never a cap to
+    # raise.
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/rust-ci
