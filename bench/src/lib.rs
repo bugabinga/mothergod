@@ -58,6 +58,7 @@ pub mod baseline;
 pub mod cm_path;
 #[cfg(feature = "corpus-fetch")]
 pub mod corpus;
+pub mod decode_profile;
 pub mod field;
 pub mod finals;
 pub mod frontier;
