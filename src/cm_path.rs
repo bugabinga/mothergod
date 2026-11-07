@@ -768,12 +768,12 @@ impl Contexts {
         }
     }
 
-    /// Each context's stretched probability at `nibble_node`.
-    fn stretches(&self, nibble_node: usize) -> [f64; CONTEXTS] {
+    /// Each context's probability at `nibble_node` through `transform`.
+    fn map(&self, nibble_node: usize, transform: impl Fn(f64) -> f64) -> [f64; CONTEXTS] {
         let i = nibble_node - 1;
         let mut out = [0.0; CONTEXTS];
         for ((out, table), &b) in out.iter_mut().zip(&self.tables).zip(&self.claimed) {
-            *out = stretch(table[b].slots[i].p());
+            *out = transform(table[b].slots[i].p());
         }
         out
     }
@@ -786,17 +786,6 @@ impl Contexts {
             .rev()
             .find(|&i| self.tables[i][self.claimed[i]].slots[nibble_node - 1].count() > 0)
             .map_or(0, |i| i + 1)
-    }
-
-    /// Each context's probability at `nibble_node` less one half, times
-    /// [`LINEAR_SCALE`].
-    fn linear(&self, nibble_node: usize) -> [f64; CONTEXTS] {
-        let i = nibble_node - 1;
-        let mut out = [0.0; CONTEXTS];
-        for ((out, table), &b) in out.iter_mut().zip(&self.tables).zip(&self.claimed) {
-            *out = (table[b].slots[i].p() - 0.5) * LINEAR_SCALE;
-        }
-        out
     }
 
     fn update(&mut self, nibble_node: usize, bit: bool) {
@@ -982,8 +971,10 @@ impl CmPath {
             if nibble_node == 1 {
                 contexts.claim_nibble(&hashes, node);
             }
-            inputs[2..2 + CONTEXTS].copy_from_slice(&contexts.stretches(nibble_node));
-            inputs[2 + CONTEXTS..INPUTS - 1].copy_from_slice(&contexts.linear(nibble_node));
+            inputs[2..2 + CONTEXTS].copy_from_slice(&contexts.map(nibble_node, stretch));
+            // Each probability less one half, times [`LINEAR_SCALE`].
+            inputs[2 + CONTEXTS..INPUTS - 1]
+                .copy_from_slice(&contexts.map(nibble_node, |p| (p - 0.5) * LINEAR_SCALE));
             inputs[INPUTS - 1] = BIAS;
 
             let seen_order = contexts.longest_seen_order(nibble_node);
