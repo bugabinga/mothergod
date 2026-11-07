@@ -227,6 +227,10 @@ release.
   that is at least as fast, with their bits/byte and encode MB/s and the
   date the pair last moved, so a reader sees what mothergod's ratio costs
   in speed against the level they would otherwise pick (#1340).
+- Benchmarks: each finals report ends its frontier section with the
+  default level's encode and decode MB/s as a share of `xz -9e`'s in the
+  same run, so how far mothergod sits from xz's speed is printed, not
+  divided by hand (#1921).
 
 ### Changed
 

@@ -90,6 +90,29 @@ impl Row {
     }
 }
 
+/// The field row the default level's rates are read against (issue #1921):
+/// release 0.1 waits on the default encoding and decoding at a share of this
+/// level's rate in the same report pass. A label [`crate::field::competitors`]
+/// produces, so the row exists whenever the field was measured.
+pub const SPEED_REFERENCE: &str = "xz -9e";
+
+/// `mothergod`'s encode and decode MB/s, each over the [`SPEED_REFERENCE`]
+/// row's in `field`, or `None` where `field` holds no such row or one with
+/// a zero rate on either axis, which a row over no files is.
+#[must_use]
+pub fn speed_shares(mothergod: &Row, field: &[Row]) -> Option<(f64, f64)> {
+    let reference = field.iter().find(|row| row.label == SPEED_REFERENCE)?;
+    let (encode, decode) = (reference.encode_mbps(), reference.decode_mbps());
+    // `mb_per_sec` reports a non-positive time as 0.0; a share of that has
+    // no meaning, and an infinity would print as one.
+    (encode > 0.0 && decode > 0.0).then(|| {
+        (
+            mothergod.encode_mbps() / encode,
+            mothergod.decode_mbps() / decode,
+        )
+    })
+}
+
 /// The competitor levels beside mothergod on the ratio/encode-speed plane.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Neighbours<'a> {
@@ -148,6 +171,9 @@ pub fn neighbours<'a>(mothergod: &Row, field: &'a [Row]) -> Neighbours<'a> {
 /// reads, `fastest level at least as good: <level>`. Each of `others`, the
 /// other levels a user may pick, `-1`, `-2` and `-4`, carries its own pair, `... as <its label>:
 /// <level>`, so a level no competitor row sits beside is still placed.
+/// Two last lines carry [`speed_shares`] of the default alone, `encode rate
+/// as a share of xz -9e's: <share>` and its decode twin, `none` where no
+/// share exists, as the neighbour lines print a missing neighbour.
 #[must_use]
 pub fn format_table(mothergod: &Row, others: &[Row], field: &[Row]) -> String {
     let mut rows: Vec<(&Row, bool)> = field.iter().map(|r| (r, false)).collect();
@@ -192,6 +218,19 @@ pub fn format_table(mothergod: &Row, others: &[Row], field: &[Row]) -> String {
             writeln!(out, "\n{what}{of}: {named}").expect("writing to a String never fails");
         }
     }
+
+    let shares = speed_shares(mothergod, field);
+    for (axis, share) in [
+        ("encode", shares.map(|(encode, _)| encode)),
+        ("decode", shares.map(|(_, decode)| decode)),
+    ] {
+        let share = share.map_or_else(|| "none".to_string(), |share| format!("{share:.3}"));
+        writeln!(
+            out,
+            "\n{axis} rate as a share of {SPEED_REFERENCE}'s: {share}"
+        )
+        .expect("writing to a String never fails");
+    }
     out
 }
 
@@ -211,14 +250,18 @@ pub fn format_section(mothergod: &Row, others: &[Row], field: &[Row]) -> String 
          The speed axis of the neighbour lines is encode MB/s (issue \
          #1340). `mothergod` is the default level, `-3`; `mothergod -1`, \
          `mothergod -2` and `mothergod -4` are the other levels, each with \
-         its own neighbour lines (issues #1708, #1824).\n\n{}",
+         its own neighbour lines (issues #1708, #1824). The last two lines \
+         are the default level's encode and decode MB/s over \
+         {SPEED_REFERENCE}'s in this run (issue #1921).\n\n{}",
         format_table(mothergod, others, field)
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Neighbours, Row, format_section, format_table, neighbours};
+    use super::{
+        Neighbours, Row, SPEED_REFERENCE, format_section, format_table, neighbours, speed_shares,
+    };
     use crate::field::FieldPoint;
     use crate::finals::FileMeasurement;
 
@@ -366,6 +409,10 @@ mod tests {
 fastest level at least as good: xz -9e
 
 best level at least as fast: xz -9e
+
+encode rate as a share of xz -9e's: 0.400
+
+decode rate as a share of xz -9e's: 0.500
 "
         );
     }
@@ -393,7 +440,59 @@ best level at least as fast: zstd -3
 fastest level at least as good as mothergod -2: xz -9e
 
 best level at least as fast as mothergod -2: zstd -3
+
+encode rate as a share of xz -9e's: 1.200
+
+decode rate as a share of xz -9e's: 1.000
 "
+        );
+    }
+
+    #[test]
+    fn shares_are_the_default_rates_over_the_reference_rates() {
+        // mothergod: 0.04 MB/s encode, 2.0 decode; xz -9e: 0.1 and 0.5.
+        let mg = row("mothergod", 250_000, 25.0);
+        let xz = Row::aggregate("xz -9e", &[(1_000_000, point(240_000, 10.0, 2.0, (0, 0)))]);
+        let (encode, decode) =
+            speed_shares(&mg, &[row("zstd -19", 250_000, 1.0), xz]).expect("xz -9e is measured");
+        assert!((encode - 0.4).abs() < 1e-12, "{encode}");
+        assert!((decode - 4.0).abs() < 1e-12, "{decode}");
+    }
+
+    #[test]
+    fn no_reference_row_or_a_zero_rate_prints_none() {
+        let mg = row("mothergod", 250_000, 25.0);
+        let unmeasured = Row::aggregate("xz -9e", &[]);
+        let untimed = |encode_secs, decode_secs| {
+            Row::aggregate(
+                "xz -9e",
+                &[(1_000_000, point(240_000, encode_secs, decode_secs, (0, 0)))],
+            )
+        };
+        for field in [
+            vec![row("xz -9", 240_000, 10.0)],
+            vec![unmeasured],
+            vec![untimed(0.0, 2.0)],
+            vec![untimed(10.0, 0.0)],
+        ] {
+            assert_eq!(speed_shares(&mg, &field), None, "{field:?}");
+            assert!(
+                format_table(&mg, &[], &field).ends_with(
+                    "\nencode rate as a share of xz -9e's: none\n\
+                     \ndecode rate as a share of xz -9e's: none\n"
+                ),
+                "{field:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_reference_is_a_level_the_field_measures() {
+        assert!(
+            crate::field::competitors()
+                .iter()
+                .any(|c| c.label() == SPEED_REFERENCE),
+            "{SPEED_REFERENCE} names no competitor, so every report would print none"
         );
     }
 
