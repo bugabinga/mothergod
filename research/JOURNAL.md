@@ -10482,8 +10482,9 @@ record.
   offset bits 3.5%, copy 2.3%, libc 6.9%, kernel 0.6%, rest 2.6%. The
   same top three stages as S2-R43, mix ahead of SSE here where SSE led
   there; SSE plus prefix, the bound on #1928's win, reads 33.6% against
-  39.2%, without the `floor` calls S2-R43 counted in SSE. | Verdict: **accepted** (`kind: "patch"`,
-  null deltas). | **Not measured:** all 12 files in one run (about 25
-  minutes on this runner); the per-byte-class split and LLVM's
-  loop-vectorize remarks, #1930's other two outputs; a second run or CPU.
+  39.2%, without the `floor` calls S2-R43 counted in SSE. | Verdict:
+  **accepted** (`kind: "patch"`, null deltas), the capability tests
+  passing. | **Not measured:** all 12 files in one run (about 25 minutes
+  on this runner); the per-byte-class split and LLVM's loop-vectorize
+  remarks, #1930's other two outputs; a second run or CPU.
   `research/progress.jsonl` it305.
