@@ -10,7 +10,7 @@ Both decisions were made with the operator's question of 2026-10-18 on the recor
 
 The 2026-11-06 report pass (`docs/benchmarks/silesia.md`, `canterbury.md`, AMD EPYC 7763, one pass) reads the default level at 1.976 b/B, 0.132 MB/s encode and 2.447 MB/s decode on Silesia, against xz -9e at 1.829, 2.029 and 68.872; xz -4 is smaller and faster both ways.
 On Canterbury the default writes the smallest output on the field, 1.347 against xz -9e's 1.403, at 0.249 and 3.606 MB/s against 1.728 and 51.711.
-Every level of gzip, zstd and xz decodes between 52 and 586 MB/s; mothergod's `-1` to `-3` decode between 1.9 and 3.6, and `-4` under 0.4.
+Every level of gzip, zstd and xz decodes between 56 and 586 MB/s on Silesia and between 48 and 92 on Canterbury; mothergod's `-1` to `-3` decode between 1.9 and 2.4 on Silesia and between 3.5 and 4.3 on Canterbury, and `-4` under 0.4 on both.
 
 The decoder is the literal model: S2-R37 measured it at 86% of the cheapest encoder tier's time, so no parse change goes under it.
 S1-P6 is exhausted within the current format (S2-A78: the per-byte cumulative rebuild does not distribute over a prefix sum; S2-A88 and S2-A90: tANS as an automatic method loses on ratio), and ADR-0074 named the way out as a second codec path and a format bump.
@@ -40,7 +40,7 @@ The weekly deep survey holds the roadmap to the merge log and the tracker under 
 
 #537 and #644 stay `blocked-on-human` with a changed ask: after M9 closes.
 Heartbeat duty 4c's top item is #1922; the ratio program's live thread (ADR-0077's model thread at `-4`, S1-P4) waits behind it or rides idle budget.
-Rung 1's room may be spent for the bar, 0.020 b/B on Silesia and 0.123 on Canterbury on the 2026-11-06 pass; a default that loses rung 1 is out of bounds.
+Rung 1's room may be spent for the bar, 0.020 b/B on Silesia and 0.122 on Canterbury on the 2026-11-06 pass; a default that loses rung 1 is out of bounds.
 The wiring slice bumps the format and retires its predecessor (ADR-0063), and the decode ratchet's constant moves with the trade stated (#907).
 The herald's surface moves (issue #1923): speed, not ratio, heads the roadmap, and the pre-alpha paragraph names the bar.
 The `-4` ratio thread, 15% under `-3` on Canterbury across versions 19 to 22, slows to what the budget leaves after #1922.

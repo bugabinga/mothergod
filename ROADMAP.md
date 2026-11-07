@@ -151,9 +151,13 @@ in order: the share printed by the finals reports and rendered on /status
 against the bar (#1921), measurement first for the reason M5 gave; the
 charter (#1922), three questions, the decode profile S2-R36 left
 unmeasured, the literal coder class that holds rung 1 at the bar's decode
-rate, and the encode tier at the new floor; then the wiring slice, filed
-from the charter's positive sealed verdict with its ADR and bump. Done
-when the last item closes and /status reads the bar met on both finals.
+rate, and the encode tier at the new floor; then the wiring slice, with its ADR
+and bump, filed into this milestone by the run that closes #1922 on a
+positive sealed verdict (the charter's own done condition), so /status
+never reads M9 done with the bar unmet; a rejection of every class
+re-decides the bar under a superseding ADR, which rewrites this section.
+Done when the last item closes and /status reads the bar met on both
+finals.
 
 ## M6: Release 0.1
 
