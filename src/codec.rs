@@ -102,22 +102,18 @@ const MAX_COLUMN_BANKS: NonZeroUsize = NonZeroUsize::new(256).unwrap();
 /// worst-case adversarial decode bounded rather than unbounded. That
 /// worst case is an all-literal stream (`research/JOURNAL.md` S2-A27):
 /// every literal byte pays [`crate::literal::Literal::decode_logit_sse`]'s
-/// full six-expert logit-domain mix plus 8 chained binary decisions over
+/// full logit-domain mix plus 8 chained binary decisions over
 /// the 256-symbol alphabet, the most expensive of the three token kinds
 /// per output byte (a match or rep byte, by contrast, is a single
 /// unmodeled array copy in this module's `copy_checked`).
-/// Measured on the retired direct-division literal path (release build,
-/// this project's CI runner class): a declared length of 256 MiB decoded
-/// in ~314s at a steady ~1170 ns/byte, linear in declared length with no
-/// polynomial or worse blowup found from 1 MiB to 256 MiB; the retired
-/// SSE-calibrated path measured ~1780 ns/byte on 8 MiB of incompressible
-/// data. `decode_logit_sse`'s own per-node cost is a bounded constant
-/// more (six `stretch` calls, a dot product, two EMA updates and one
-/// stretch-domain `LogitSse` lookup per node), with no new loop or
-/// allocation, so the bound stays linear in `declared_len`; not
-/// separately remeasured. The length and distance model selection costs
-/// a cheap `CopyKind` branch or array index per copy token, strictly
-/// cheaper than the per-byte literal cost this bound is measured against.
+/// The bench crate's `hostile_decode` times it (issue #1915); its read at
+/// version 22, release build, AMD EPYC 7763: a declared length of 256 MiB
+/// decoded in 843 s, 3.1 µs per byte. A literal's work is a bounded
+/// constant with no loop or allocation of its own, so the bound is linear
+/// in `declared_len` (S2-A27 found no blowup from 1 MiB to 256 MiB). The
+/// length and distance model selection costs a cheap `CopyKind` branch or
+/// array index per copy token, strictly cheaper than the per-byte literal
+/// cost this bound is measured against.
 /// A `Method::Cm` frame codes every byte through [`crate::cm_path`], a
 /// full model walk per output byte whatever its stream, so it has its own
 /// ceiling below this one, [`crate::cm_path::MAX_OUTPUT_LEN`], whose

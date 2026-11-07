@@ -10358,3 +10358,31 @@ record.
   because the per-try reads were train only; `Lz`'s worst case on this
   runner, so the 83% is a cross-runner estimate. `research/progress.jsonl`
   it281 to it302.
+- S2-A153 | ACCEPTED | ADR-0077's live thread, the capability its model
+  sessions lacked (issue #1915): the hostile decode of each coded method
+  at its ceiling, timed by the bench crate on one CPU. S2-A150 to S2-A152
+  each timed `Cm`'s worst case with scratch code and compared it with
+  `Lz`'s 314 s from S2-A27, read on a retired literal path, another build
+  and another runner. | Mechanism: `mothergod_bench::hostile` builds two
+  payloads with `Candidate::Identity`. `Lz` gets an empty range-coded
+  stream, read as zero bits, so every flag decodes to a literal, with a
+  token count equal to the declared length. `Cm` gets the fewest
+  pseudo-random stream bytes `cm_path::MAX_EXPANSION` admits, now `pub`
+  for this. `hostile_decode` times one decode of each at its ceiling and
+  exits non-zero when `Cm`'s exceeds `Lz`'s. A decode that errs or
+  stops short panics, so a rejection is never reported as a time. Before
+  the full read, a scratch read through the same `time` with a
+  `Transpose` selector at 8 MiB: `Identity` 3,130 and 3,139 ns per byte,
+  `Transpose` at 2, 4 and 96 columns 1,571 to 1,582. So `Identity`'s
+  `decode_logit_sse` is the dearer literal, and the column path is not
+  `Lz`'s worst case. The full read, release build, AMD EPYC 7763 4
+  logical cores runner, main at `df405fc`, version 22, one run: `Lz` at
+  256 MiB **843.04 s**, 3,141 ns per byte; `Cm` at 16 MiB **267.21 s**,
+  15,927 ns per byte; `Cm` is **32%** of `Lz`. | Verdict: **accepted**
+  (`kind: "patch"`, null deltas). Two figures were wrong. `Lz`'s worst
+  case is 2.7x the 314 s `codec::MAX_DECODED_LEN`'s doc quoted. S2-A152's
+  "about 83% of `Lz`'s" was really 32%, because its `Lz` term was stale and
+  its `Cm` term (about 260 s, scaled across runners) was close. Both docs
+  now quote the bin's read. | **Not measured:** other CPUs; whether a
+  non-zero `Lz` stream that still decodes all literals costs more than
+  zero bits; a second run of either. `research/progress.jsonl` it303.

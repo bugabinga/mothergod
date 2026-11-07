@@ -70,17 +70,15 @@ use crate::{Error, fan_out, logistic, try_filled_vec};
 
 /// The most bytes one [`crate::Method::Cm`] frame, and one [`decode`],
 /// outputs: a ceiling below [`MAX_DECODED_LEN`], because every output byte
-/// pays a full walk and none is a copy. Measured at version 22 on
-/// pseudo-random streams (release build, AMD EPYC 9V45 4 logical cores):
-/// 1 KiB, 512 KiB and 4 MiB less 64 bytes, each declaring 4 MiB, 10.6 to
-/// 10.9 µs per output byte whatever the stream; 4 KiB declaring this
-/// ceiling, 174.7 and 180.9 s over two runs, 27% over version 21 read
-/// interleaved on that runner. The worst case is linear. Version 21 read
-/// 205 s on an AMD EPYC 7763 runner, so a hostile frame here costs about
-/// 260 s there, about 83% of `Lz`'s 314 s at [`MAX_DECODED_LEN`], a figure
-/// read on an earlier build and runner (`research/JOURNAL.md` S2-A151,
-/// S2-A152). It equals the block length [`crate::compress`] cuts at, so no
-/// frame this crate writes is refused.
+/// pays a full walk and none is a copy. A hostile frame at this ceiling
+/// decodes no slower than a hostile `Method::Lz` frame at
+/// [`MAX_DECODED_LEN`] (ADR-0079): the bench crate's `hostile_decode`
+/// times both on one CPU and exits non-zero when that inverts (issue
+/// #1915). Its read at version 22, release build, AMD EPYC 7763: 267 s
+/// here, 32% of `Lz`'s 843 s. The walk's cost does not depend on the
+/// stream, so the worst case is linear in the declared length
+/// (`research/JOURNAL.md` S2-A152). It equals the block length
+/// [`crate::compress`] cuts at, so no frame this crate writes is refused.
 pub const MAX_OUTPUT_LEN: u32 = 16 * 1024 * 1024;
 
 const _: () = assert!(
@@ -88,8 +86,8 @@ const _: () = assert!(
     "a Cm frame is a coded frame, under the coded frames' ceiling"
 );
 
-/// The reciprocal of [`PROBABILITY_FLOOR`], and so the most bytes one
-/// stream byte decodes to: [`decode`]'s bomb guard.
+/// The reciprocal of `PROBABILITY_FLOOR`, the outer mixer's clamp, and so
+/// the most bytes one stream byte decodes to: [`decode`]'s bomb guard.
 ///
 /// Invariant: every node codes at a probability inside the floor, so it
 /// costs at least `-log2(1 - PROBABILITY_FLOOR)`, which exceeds
@@ -102,7 +100,7 @@ const _: () = assert!(
 /// fewer than its cost, its interval starting at `2^32` and ending above
 /// `2^30`, plus its final bit; the margin covers that bit past 1157
 /// output bytes, and below them [`encode`]'s one byte at least does.
-const MAX_EXPANSION: u32 = 4096;
+pub const MAX_EXPANSION: u32 = 4096;
 
 /// Every probability the outer mixer stretches or codes is clamped to
 /// `[PROBABILITY_FLOOR, 1 - PROBABILITY_FLOOR]`, bounding a stretch to

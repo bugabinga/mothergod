@@ -73,8 +73,9 @@ release.
   `-4` is 12.2% smaller than `-3` at 3.1x its encode time and 14.5x its
   decode time; on Canterbury, 15.1% smaller at 4.6x and 9.9x. A decoder
   refuses such a frame past 16 MiB of output, which caps a hostile one's
-  decode at about 180 s on a 4-core AMD EPYC 9V45 runner, as the model
-  stands after the three `-4` entries under Changed.
+  decode at about 270 s on a 4-core AMD EPYC 7763 runner, under the 840 s
+  a hostile `-3` frame takes at its 256 MiB cap on the same runner, as the
+  model stands after the three `-4` entries under Changed.
   `-1` to `-3` write what they wrote.
   `FORMAT_VERSION` 18 to 19, ADR-0079 (#1825).
 - site: mothergod.dev/decisions renders the ADR series from `docs/adr/`,
