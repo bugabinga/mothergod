@@ -93,15 +93,6 @@ exclude_re = [
   # mutants: 1
   "replace \\| with \\^ in Slot::update$",
 
-  # Equivalent: cm_path's INPUTS at `2 * ORDERS.len()` adds two mixer
-  # inputs no line writes, so each stays 0, its weight starts 0, and its
-  # update adds rate * error * 0: the mix and every coded bit are
-  # unchanged. Pinned: the expression has no function to scope by, and
-  # the `$` after the operator matches only a mutant outside every
-  # function.
-  # mutants: 1
-  "^src/cm_path\\.rs:\\d+:25: replace \\+ with \\*$",
-
   # Equivalent: three relabelings in CmPath::walk, each a bijection on
   # the indices of a table it reads and updates through the same index,
   # every entry starting equal, so the mix and every coded bit are
@@ -109,12 +100,13 @@ exclude_re = [
   #   col 43  `bucket * 2 - predicted bit`: 2b and 2b - 1 stay distinct,
   #           and a live match's bucket is at least 6, so nothing wraps.
   #   col 74  the predicted bit inverted swaps the pair 2b, 2b + 1.
-  #   col 53  the nibble test inverted swaps the weight sets 2b, 2b + 1.
+  #   col 36  the nibble test inverted swaps the weight sets 2k, 2k + 1
+  #           inside each (seen order, match class) pair.
   # Pinned: the function carries catchable `+` and `>=` mutants.
   # mutants: 3
   "^src/cm_path\\.rs:\\d+:43: replace \\+ with - in CmPath::walk$",
   "^src/cm_path\\.rs:\\d+:74: replace >= with < in CmPath::walk$",
-  "^src/cm_path\\.rs:\\d+:53: replace >= with < in CmPath::walk$",
+  "^src/cm_path\\.rs:\\d+:36: replace >= with < in CmPath::walk$",
 
   # Non-terminating: the renorm loops exit only when `low` and `high`
   # cross HALF or QUARTER. Pinning the interval (mask forced to ones) or

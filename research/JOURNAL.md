@@ -2922,7 +2922,9 @@ record.
   records its probe and `delta` refuses another's, accepted; full record
   in S2-A149's own entry. Thirty-first slice, S2-R41: the far reach at
   `-2`, as its one parse and as a second parse kept only when smaller,
-  rejected; full record in S2-R41's own entry.
+  rejected; full record in S2-R41's own entry. Thirty-second slice,
+  S2-R42: that second parse gated on the wide parse's far-match rate,
+  rejected; full record in S2-R42's own entry.
 - S1-P5 | RESOLVED 2026-09-17, closed by S2-A79 (`FORMAT_VERSION` 4,
   ADR-0046) | Per-column modeling after transpose (filter-aware coder,
   OpenZL direction). Target: sao. First slice: S2-A64 (standalone
@@ -10119,3 +10121,240 @@ record.
   reach, and it failed. **Not measured:** the finals at `-2`, and
   wall time on a single-block input with the far parse on a second
   thread. `research/progress.jsonl` it257, it258.
+- S2-A150 | ACCEPTED | ADR-0077's live thread, the model: lpaq1's
+  contexts the path lacked. Hypothesis: hashed tables for a word context,
+  order 2 and a word pair, mixed beside `cm_path`'s orders 3 to 6, lower
+  the train mean against the hybrid's real bitstream without a sealed
+  regression, most on the text-shaped cases. | Mechanism: a loop session
+  (ADR-0070), each try a change to `CmPath` priced through
+  `whole_stream::case_delta_vs_real_bitstream` over `baseline::cases()` at
+  `CASE_LEN`, release build, AMD EPYC 9V45 4 logical cores runner, main at
+  `ad4c5b9` as champion, train mean -0.229311 against the hybrid. Tries in
+  order, each delta against the champion it was applied to: it259 a word
+  context, the letters since the last non-letter, case folded, after
+  that non-letter (lpaq1), **-0.003538**, kept; it260 hashed order 2,
+  **-0.003489**, kept; it261 order 1, +0.000467, reverted, because the wire
+  model already carries order 1 and the redundant input costs most where
+  nothing is predictable (`entropy_ladder_h8` +0.003130); it262 dropping
+  order 5 for lpaq1's own set, +0.000180, reverted, because order 5 carries
+  the structured cases (`json_records` +0.004204); it263 a word pair, the
+  previous word and the current one with the non-letters between skipped
+  (paq8), **-0.003253**, kept. The keeper, main plus it259, it260 and
+  it263, against main: train **-0.010280**, `json_records` -0.049766,
+  `base64_wrapped` -0.037818, `entropy_ladder_h4` -0.019706, while
+  `entropy_ladder_h8` rises 0.005264, `entropy_ladder_h1` 0.003762 and
+  `interleaved_audio16` 0.000565. Sealed, read once through
+  `cm_path::train_and_sealed_vs_real_bitstream` at
+  `sealed_seed(CASE_SEED)`, main read the same way on the same runner:
+  `access_log` -0.155078 to -0.181121 (**-0.026043**), `gradient_image`
+  -0.148004 to -0.173845 (**-0.025841**). The tries scanned each word back
+  from the prefix's end, which is quadratic on a long run of letters; the
+  shipped `Words` keeps both hashes as running state, one update per
+  byte, and reproduces every train and sealed number above to six
+  decimals. Whole `-4` frames through
+  `cm_path::extreme_frames_vs_real_bitstream`, same runner, against main:
+  train **-0.010764**, both sealed kinds -0.025920; `entropy_ladder_h1`'s
+  frame grows 24 bytes and `interleaved_audio16`'s 3, both still smaller
+  than `-3`'s. Decode cost through `cm_path::decode_costs_vs_hybrid`, three
+  interleaved reads each: the path 738.3 to 739.2 calibration steps per
+  byte on main, 871.7 to 872.8 on the keeper (**+133.7**, about 18%); the
+  hybrid's 111.4 to 112.3 both ways, and `baseline_gate check` passes with
+  `bench/baseline.json` moved by digest only. Worst-case decode,
+  `cm_path::decode` on pseudo-random streams, release build, AMD EPYC
+  7763 4 logical cores runner: 4 KiB declaring the 16 MiB
+  `MAX_OUTPUT_LEN`, main 91.36 and 91.42 s, the keeper 116.39 and
+  116.87 s, interleaved (**+27%**, more than the calibration unit's 18%
+  says); the keeper at 1 KiB, 512 KiB and 4 MiB less 64 bytes, each
+  declaring 4 MiB, one run each, 6,405, 6,783 and 6,887 ns per byte.
+  The hostile frame at the cap now costs about 37% of `Lz`'s 314 s at
+  `codec::MAX_DECODED_LEN`, a figure read on an earlier build and
+  another runner, where S2-A142 left it under a third. | Verdict: **accepted**,
+  train improvement and no sealed regression, wired as `FORMAT_VERSION`
+  20 (ADR-0081). | **Not measured:** the finals at `-4`; the word
+  contexts' share of the sealed gain against order 2's, because the
+  per-try reads were train only; a word defined past ASCII letters.
+  `research/progress.jsonl` it259 to it263.
+- S2-R42 | REJECTED | Lead S1-P4, S2-R41's reopening condition: a cheap
+  predictor of a far win. Hypothesis: the rate of matches past
+  `lz::WINDOW` in `-2`'s own one-round wide parse predicts where a far
+  second parse wins, so gating S2-R41's try 2 on it keeps that try's
+  train gain at near-zero encode cost on the cases it cannot help. |
+  Mechanism: a loop session (ADR-0070), one try, it264, `baseline_gate
+  measure` and `delta` at `--level 2 --len 4000000`, release build, AMD
+  EPYC 9V45 4 logical cores runner, main at `865a489` as champion. A
+  diagnostic first, on train only: the far parse at one round beside the
+  wide one shrinks only `markov_h8_2_trap` (151 bytes) and grows the other
+  ten, by up to 1,488 bytes; the far parse at `DP_ROUNDS` shrinks 8 of 11,
+  the extra rounds and not the reach. Matches past `lz::WINDOW` per 2,048
+  bytes past it: `markov_h8_2_trap` 1.305, every losing case at or under
+  `entropy_ladder_h1`'s 0.581. The try: the far parse runs when that rate
+  exceeds 1.0, the far body kept only when strictly smaller. Train
+  **-0.000027** b/B, all of it `markov_h8_2_trap` (-0.000302), S2-R41's
+  try 2 gain in full; gate wall time 72.20 to 65.52 s, one run each,
+  because the far parse ran on one case of eleven. Sealed, read once:
+  `access_log` and `gradient_image` unchanged, mean **+0.000000**, wall
+  time 12.86 to 13.24 s. Read after the verdict, tuning nothing, the
+  sealed rates are `access_log` 0.897, where S2-R41 found the far parse
+  gains nothing, and `gradient_image` 0.008, the one sealed case it
+  shrinks: the statistic ranks them backwards. | Verdict: **rejected**;
+  the corpus policy alone would accept, train down and no sealed
+  regression. The train gain is the one point the threshold was fit to,
+  so it is not evidence, and out of sample the gate found 0 of 1 far
+  wins. Mechanism of failure: the 1 to 2 MiB band the wide parse sees
+  does not predict the 2 to 16 MiB band it cannot, because structure
+  whose recurrence lies past `lz::WIDE_WINDOW` (`gradient_image`) leaves
+  no matches inside it, and chance recurrence on a low-order source
+  (`markov_h8_2_trap`) fills both bands alike. Code deleted with the
+  verdict. | Conditions: a predictor that reads the 2 to 16 MiB band
+  itself, a sampled hash of anchors at those distances, is the
+  untested form; S2-R11's detector read the 1 to 2 MiB band for the wide
+  reach. The prize is small: S2-R41's ungated far parse moved 2 of 13
+  cases, none past 0.0003 b/B. `research/progress.jsonl` it264.
+- S2-A151 | ACCEPTED | ADR-0077's live thread, the model: lpaq1's
+  calibration stage and paq8's record and sparse contexts, which the path
+  lacked. Hypothesis: calibration tables after the outer mixer and
+  contexts keyed on a detected record length and on byte columns at fixed
+  strides lower the train mean against the hybrid's real bitstream
+  without a sealed regression, most on the record and sample cases. |
+  Mechanism: a loop session (ADR-0070), each try a change to `CmPath`
+  priced through `whole_stream::case_delta_vs_real_bitstream` over
+  `baseline::cases()` at `CASE_LEN`, release build, AMD EPYC 7763 4
+  logical cores runner, main at `6562598` as champion, train mean
+  -0.239591 against the hybrid, S2-A150's keeper reproduced. Tries in
+  order, each delta against the champion it was applied to: it265 an APM
+  keyed on the bit-tree node, blended `(p + 3 a) / 4`, **-0.009852**, kept;
+  it266 a second APM keyed on the last byte and the node, averaged in,
+  **-0.005259**, kept; it267 a second mixer selected by the node, its
+  output averaged in the logit domain, +0.002501, reverted, because 256
+  weight sets learn too slowly at `CASE_LEN` and halve the match-selected
+  mixer's weight (`json_records` +0.011939); it268 the counter limit 1023
+  to 255, +0.000305, reverted; it269 a sparse context of bytes 3 and 2
+  back, **-0.003777**, kept; it270 bytes 2 and 4 back, **-0.025355**, kept,
+  `interleaved_audio16` -0.250889; it271 the mixer step 0.005 to 0.0035,
+  +0.001245, reverted; it272 the step to 0.007, **-0.000427**, kept by the
+  loop's rule with 8 of 11 cases rising; it273 bytes 4 and 8 back,
+  **-0.005889**, kept; it274 a third APM keyed on 8 bits of the order-2 hash,
+  **-0.000194**, kept, nearly all of it the iid `entropy_ladder_h8`; it275
+  paq8's record model, a length from three equal gaps between repeats of
+  one byte value, keyed with one record above and the last byte,
+  **-0.015947**, kept, `sqlite_like_records` -0.118136; it276 one and two
+  records above, **-0.012005**, kept; it277 a text column context, the byte
+  above in the previous line, +0.000528, reverted, because no train case
+  has aligned lines and it collapses to order 1 (it261's redundancy);
+  it278 a fourth APM keyed on the match model's state, **-0.001921**, kept;
+  it279 and it280 the match minimum length 6 to 8 and to 5, +0.000355 and
+  +0.000090, reverted. The keeper, main plus the ten kept tries, against
+  main: train **-0.080626**, `interleaved_audio16` -0.299222,
+  `sqlite_like_records` -0.279871, `json_records` -0.131476,
+  `base64_wrapped` -0.107152, while `entropy_ladder_h8` rises 0.015767.
+  Sealed, read once through `cm_path::train_and_sealed_vs_real_bitstream`
+  at `sealed_seed(CASE_SEED)`, main read the same way on the same runner:
+  `access_log` -0.181121 to -0.260453 (**-0.079332**), `gradient_image`
+  -0.173845 to -0.235188 (**-0.061343**). The shipped code names the
+  contexts and folds the four tables into one `Calibration`, and
+  reproduces every train and sealed number above to six decimals. Whole
+  `-4` frames through `cm_path::extreme_frames_vs_real_bitstream`, same
+  runner, against main: train **-0.082065**, `access_log` -0.079360,
+  `gradient_image` -0.061280, no case growing (`entropy_ladder_h8` stays
+  stored). Decode cost through `cm_path::decode_costs_vs_hybrid`, three
+  interleaved reads each: the path 710.1 to 777.4 calibration steps per
+  byte on main, 1364.6 to 1397.8 on the keeper (**+617.0** at the
+  medians, about 80%); the hybrid's 90.6 to 105.9 both ways.
+  Worst-case decode, `cm_path::decode` on a pseudo-random 4 KiB stream
+  declaring the 16 MiB `MAX_OUTPUT_LEN`, interleaved: main 114.88 and
+  114.40 s, the keeper 205.79 and 204.13 s (**+79%**), about 65% of `Lz`'s
+  314 s at `codec::MAX_DECODED_LEN`; the keeper at 1 KiB, 512 KiB and 4 MiB
+  less 64 bytes, each declaring 4 MiB, one run each, 11,955, 12,077 and
+  12,096 ns per byte. | Verdict: **accepted**, train improvement and no
+  sealed regression, wired as `FORMAT_VERSION` 21 (ADR-0082). |
+  **Not measured:** the finals at `-4`; each try's share of the sealed
+  gain, because the per-try reads were train only; whether it272's step
+  and it274's table, the two smallest kept gains, pay on the sealed set
+  alone. `research/progress.jsonl` it265 to it280.
+- S2-A152 | ACCEPTED | ADR-0077's live thread, the model: paq8l's
+  indirect and record-position contexts, its linear-domain and bias
+  inputs, and its mixer selection by context depth, which the path lacked.
+  Hypothesis: contexts of what followed the last bytes' earlier
+  occurrences and of the position within a record, each context fed twice
+  to a mixer whose weights are chosen by how long a context the hashed
+  orders hold, lower the train mean against the hybrid's real bitstream
+  without a sealed regression, most on the record and sample cases. |
+  Mechanism: a loop session (ADR-0070), each try a change to `CmPath`
+  priced through `whole_stream::case_delta_vs_real_bitstream` over
+  `baseline::cases()` at `CASE_LEN`, release build, AMD EPYC 9V45 4
+  logical cores runner, main at `0804a33` as champion, train mean
+  -0.320217 against the hybrid, S2-A151's keeper reproduced. Tries in
+  order, each delta against the champion it was applied to: it281
+  paq8l's indirect contexts, the last byte and the last two bytes each
+  with the two bytes that followed their last two occurrences,
+  **-0.003537**, kept; it282 a constant bias input, **-0.000593**, kept;
+  it283 hashed order 8, **-0.000160**, kept; it284 each context fed again
+  as `2 (p - 1/2)`, paq8's linear-domain input, **-0.001170**, kept; it285
+  a second match model with a 24-byte minimum, -0.0000001, below the
+  records' six-decimal resolution and counted as no fall, reverted; no
+  case moved past 0.00016, consistent with the long model predicting what
+  the 6-byte one does at `CASE_LEN`, which was not read; it286 and it287 the linear scale 2 to 4 and to 1,
+  +0.000672 and +0.000560, reverted; it288 a sparse context of the last
+  four bytes' high nibbles (paq8l), **-0.000686**, kept; it289 bytes 1
+  and 3 back, +0.000364, reverted, `interleaved_audio16` +0.001331 and
+  `entropy_ladder_h6` +0.001066 outweighing small falls on four cases; it290 weight sets also selected by the
+  longest order whose slot has learned, **-0.000769**, kept,
+  `sqlite_like_records` -0.020; it291 the 21 length buckets in that
+  selector coarsened to three match classes, **-0.000340**, kept, 21 sets
+  per nibble half in place of 147; it292 a fifth
+  calibration table keyed on that order, **-0.000266**, kept; it293 the
+  indirect context for the last three bytes, hashed, **-0.000238**, kept;
+  it294 the position within a record with one record above,
+  **-0.003479**, kept, `interleaved_audio16` -0.019, `sqlite_like_records`
+  -0.021; it295 that position with the last byte, +0.000405, reverted;
+  it296 the position alone, **-0.000240**, kept; it297 the mixer step
+  0.007 to 0.005, **-0.000485**, kept, the input count having about
+  doubled; it298 the step to 0.004, +0.000424, reverted; it299 paq8l's
+  distance model, the distances to the last zero, space and newline with
+  the last byte, +0.000047, reverted, small rises spread over nine cases,
+  most on `entropy_ladder_h2` and `markov_h8_2_trap`, an input with
+  little to say costing its learning noise; it300 digits counted as
+  letters in words, +0.000190, reverted, `json_records` +0.001486 and
+  `base64_wrapped` +0.000439, the two cases whose letter runs meet digits,
+  which then join the word and its pair; it301 the position with one and two records above,
+  **-0.001095**, kept; it302 dropping S2-A151's record column now that
+  it301 keys the same bytes by position, +0.000863, reverted,
+  `json_records` +0.004970 and `base64_wrapped` +0.004849, whose rows are
+  not fixed width, so a position counted from the stream's start drifts
+  where the bytes a record above do not (inferred, not isolated). The
+  keeper,
+  main plus the thirteen kept tries, against main: train **-0.013058**,
+  `sqlite_like_records` -0.072961, `json_records` -0.027382,
+  `interleaved_audio16` -0.020995, `base64_wrapped` -0.013434,
+  `x86_dense_code` -0.007000, while `entropy_ladder_h8` rises 0.004802,
+  `entropy_ladder_h1` 0.000510, `markov_h8_2_trap` 0.000249 and
+  `entropy_ladder_h2` 0.000181. Sealed, read once through
+  `cm_path::train_and_sealed_vs_real_bitstream` at
+  `sealed_seed(CASE_SEED)`, main read the same way on the same runner:
+  `access_log` -0.260453 to -0.313554 (**-0.053101**), `gradient_image`
+  -0.235188 to -0.310263 (**-0.075075**). The shipped code names the
+  contexts, folds the indirect state into one `Indirect` and the column
+  into `Records::column`, and reproduces the keeper's train mean to nine
+  decimals. Whole `-4` frames through
+  `cm_path::extreme_frames_vs_real_bitstream`, same runner, against main:
+  train **-0.013513**, `access_log` -0.052880, `gradient_image`
+  -0.075200; `entropy_ladder_h1`'s frame grows 4 bytes,
+  `entropy_ladder_h2`'s and `markov_h8_2_trap`'s 1 each, and the
+  3,000-byte `extreme-delta-samples` golden input 14 (2427 to 2441), the
+  warm-up S1-L4 predicts for more inputs on less data. Decode cost
+  through `cm_path::decode_costs_vs_hybrid`, three interleaved reads
+  each: the path 1478.0 to 1553.7 calibration steps per byte on main,
+  1922.7 to 2068.0 on the keeper (**+450.1** at the medians, about 29%);
+  the hybrid's 109.8 to 116.2 both ways. Worst-case decode,
+  `cm_path::decode` on a pseudo-random 4 KiB stream declaring the 16 MiB
+  `MAX_OUTPUT_LEN`, same runner, interleaved: main 143.32 and 136.31 s,
+  the keeper 180.90 and 174.71 s (**+27%**); the keeper at 1 KiB, 512 KiB
+  and 4 MiB less 64 bytes, each declaring 4 MiB, one run each, 10,692,
+  10,868 and 10,600 ns per byte. S2-A151's 205 s on an EPYC 7763 scales
+  to about 260 s there, about 83% of `Lz`'s 314 s, an estimate across
+  runners and builds. | Verdict: **accepted**, train improvement and no
+  sealed regression, wired as `FORMAT_VERSION` 22 (ADR-0083).
+  | **Not measured:** the finals at `-4`; each try's share of the sealed gain,
+  because the per-try reads were train only; `Lz`'s worst case on this
+  runner, so the 83% is a cross-runner estimate. `research/progress.jsonl`
+  it281 to it302.

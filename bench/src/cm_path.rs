@@ -171,7 +171,6 @@ pub fn extreme_frames_vs_real_bitstream() -> PairingReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mothergod::literal::{Literal, SurpriseLogisticMix};
 
     /// Prices `data` through `model`, byte by byte, as the driver does.
     fn price_all(model: &mut CmPath, data: &[u8]) -> Vec<f64> {
@@ -186,24 +185,24 @@ mod tests {
             .collect()
     }
 
+    /// A byte's price is the summed cost of the decisions its walk codes;
+    /// that a fresh model starts as the wire model is the codec crate's
+    /// test, not this one's.
     #[test]
-    fn a_fresh_candidate_prices_the_first_byte_as_the_wire_model_does() {
+    fn a_price_sums_the_cost_of_every_decision_the_walk_codes() {
         let byte = b'q';
-        let mut wire = Literal::new();
-        let mut wire_mixer = SurpriseLogisticMix::new();
-        let mut wire_bits = 0.0;
-        wire.walk_logit_sse(Context::default(), &mut wire_mixer, |mid, p| {
+        let mut decisions = Vec::new();
+        CmPath::new().walk(Context::default(), &[], |mid, p| {
             let bit = usize::from(byte) >= mid;
-            wire_bits += cost_bits(bit, p);
+            decisions.push((bit, p));
             bit
         });
+        let expected: f64 = decisions.iter().map(|&(bit, p)| cost_bits(bit, p)).sum();
 
         let bits = price(&mut CmPath::new(), Context::default(), &[], byte);
 
-        assert!(
-            (bits - wire_bits).abs() < 1e-9,
-            "weight 1 on the wire model, 0 elsewhere: {bits} vs {wire_bits}"
-        );
+        assert_eq!(decisions.len(), 8, "a byte is eight decisions");
+        assert!((bits - expected).abs() < 1e-12, "{bits} vs {expected}");
     }
 
     #[test]

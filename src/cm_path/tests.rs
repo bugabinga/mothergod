@@ -31,8 +31,11 @@ fn round_trips(data: &[u8]) {
     assert_eq!(decode(&stream, len, MAX_DECODED_LEN).as_deref(), Ok(data));
 }
 
+/// A fresh mixer weighs the wire model 1 and every other input 0, so the
+/// first decision codes at the wire model's probability. Only the first:
+/// the bias input is never 0, so its weight learns from the first bit on.
 #[test]
-fn a_fresh_model_codes_the_first_byte_at_the_wire_models_probabilities() {
+fn a_fresh_model_codes_the_first_decision_at_the_wire_models_probability() {
     let byte = b'q';
     let mut wire = Literal::new();
     let mut wire_mixer = SurpriseLogisticMix::new();
@@ -45,12 +48,12 @@ fn a_fresh_model_codes_the_first_byte_at_the_wire_models_probabilities() {
     let p = probabilities(&mut CmPath::new(), &[byte]);
 
     assert_eq!(p.len(), wire_p.len());
-    for (p, wire_p) in p.iter().zip(&wire_p) {
-        assert!(
-            (p - wire_p).abs() < 1e-12,
-            "weight 1 on the wire model, 0 elsewhere: {p} vs {wire_p}"
-        );
-    }
+    assert!(
+        (p[0] - wire_p[0]).abs() < 1e-12,
+        "weight 1 on the wire model, 0 elsewhere: {} vs {}",
+        p[0],
+        wire_p[0]
+    );
 }
 
 #[test]
@@ -100,6 +103,40 @@ fn round_trips_text_repeats_runs_and_noise() {
     round_trips(&[half.as_slice(), &text, half.as_slice()].concat());
 }
 
+/// Fixed-width records whose fields recur by column, and interleaved
+/// 16-bit samples: the data classes the record and sparse contexts read
+/// (`research/JOURNAL.md` S2-A151), round tripped, with the record length
+/// found on the way.
+#[test]
+fn round_trips_fixed_width_records_and_interleaved_samples() {
+    let mut noise = Xorshift32::new(29);
+    let records: Vec<u8> = (0u32..800)
+        .flat_map(|row| {
+            let id = row.to_le_bytes();
+            let flags = u8::try_from(row % 3).expect("below 3");
+            let reading = noise.next().expect("an endless stream").to_le_bytes()[0];
+            [
+                id[0], id[1], 0, 0, b'|', flags, reading, b'\n', 0x7f, 0x01, 0, 0, 0, b'#',
+            ]
+        })
+        .collect();
+    round_trips(&records);
+    let mut records_seen = Records::new();
+    for &b in &records {
+        records_seen.push(b);
+    }
+    assert_eq!(records_seen.length, 14, "every row is 14 bytes");
+
+    let samples: Vec<u8> = (0i32..6000)
+        .flat_map(|i| {
+            let left = i16::try_from(i * 7 % 2001 - 1000).expect("within i16");
+            let right = left.wrapping_neg();
+            [left.to_le_bytes(), right.to_le_bytes()].concat()
+        })
+        .collect();
+    round_trips(&samples);
+}
+
 /// Matches longer than [`MATCH_VERIFY_LIMIT`] and past the last
 /// [`length_bucket`]: the match model grows them a byte at a time on both
 /// sides.
@@ -129,8 +166,9 @@ fn decode_rejects_a_length_over_its_bound_before_any_work() {
 
 /// A caller's bound past [`MAX_OUTPUT_LEN`] buys it nothing: issue
 /// #1808's `u32::MAX` would otherwise reach 4 GiB of output and work, and
-/// [`MAX_DECODED_LEN`] about 1,400 s of it. The ceiling itself is admitted,
-/// so the empty stream falls to the floor instead.
+/// [`MAX_DECODED_LEN`] 16 times the ceiling's measured worst case. The
+/// ceiling itself is admitted, so the empty stream falls to the floor
+/// instead.
 #[test]
 fn decode_caps_a_callers_bound_at_the_output_ceiling() {
     for bound in [MAX_DECODED_LEN, u32::MAX] {
@@ -259,6 +297,19 @@ fn length_buckets_are_monotone_and_in_range() {
     }
 }
 
+/// Every length bucket maps into the mixer's [`MATCH_CLASSES`], none,
+/// short or long, at the boundary the doc names.
+#[test]
+fn match_classes_split_none_short_and_long() {
+    let classes: Vec<usize> = (0..LENGTH_BUCKETS).map(match_class).collect();
+    assert!(classes.windows(2).all(|w| w[0] <= w[1]));
+    assert!(classes.iter().all(|&c| c < MATCH_CLASSES));
+    assert_eq!(
+        [0, 1, 15, 16, LENGTH_BUCKETS - 1].map(match_class),
+        [0, 1, 1, 2, 2]
+    );
+}
+
 #[test]
 fn a_check_is_the_hashs_top_sixteen_bits() {
     assert_eq!(check_of(0xabcd_0000_0000_1234), 0xabcd);
@@ -286,7 +337,8 @@ fn a_followed_match_grows_past_the_verify_limit() {
 /// The coded stream of one mixed input, pinned: text, noise, a run and a
 /// repeat longer than the verify limit, so every input of the mixer
 /// speaks, then more noise than the order tables hold, so contexts collide
-/// and evict and the hash decides which. The journal's numbers for this path (S2-A133 to S2-A138) were
+/// and evict and the hash decides which. The journal's numbers for this path (S2-A133 to S2-A138,
+/// S2-A150 to S2-A152) were
 /// read through this model, and the wiring slice ships the model that
 /// produced them; a change here is a new candidate, re-read on train and
 /// sealed, and this pin moves with its journal entry. Also a determinism
@@ -311,8 +363,305 @@ fn the_coded_stream_of_a_mixed_input_is_pinned() {
 
     assert_eq!(
         (stream.len(), crate::crc32::crc32(&stream)),
-        (66_491, 2_313_715_878),
+        (66_673, 3_123_352_101),
         "the model changed: re-read it as a candidate"
+    );
+}
+
+/// [`Words::word`] by its definition, scanning `prefix` back: the letters
+/// since the last non-letter, after that non-letter when one exists.
+fn word_by_scan(prefix: &[u8]) -> u64 {
+    let start = prefix
+        .iter()
+        .rposition(|b| !b.is_ascii_alphabetic())
+        .unwrap_or(0);
+    prefix[start..].iter().fold(mix64(WORD_SEED), |h, b| {
+        mix64(h ^ u64::from(b.to_ascii_lowercase()))
+    })
+}
+
+/// [`Words::bigram`] by its definition: the last letter run before the
+/// current one, a space, then the current run.
+fn bigram_by_scan(prefix: &[u8]) -> u64 {
+    let letters_end = |end: usize| {
+        prefix[..end]
+            .iter()
+            .rposition(|b| !b.is_ascii_alphabetic())
+            .map_or(0, |i| i + 1)
+    };
+    let current = letters_end(prefix.len());
+    let gap = prefix[..current]
+        .iter()
+        .rposition(u8::is_ascii_alphabetic)
+        .map_or(0, |i| i + 1);
+    let previous = letters_end(gap);
+    prefix[previous..gap]
+        .iter()
+        .chain(b" ")
+        .chain(&prefix[current..])
+        .fold(mix64(BIGRAM_SEED), |h, b| {
+            mix64(h ^ u64::from(b.to_ascii_lowercase()))
+        })
+}
+
+/// [`Words`] after pushing every byte of `prefix`.
+fn words_after(prefix: &[u8]) -> Words {
+    let mut words = Words::new();
+    for &b in prefix {
+        words.push(b);
+    }
+    words
+}
+
+/// The one-byte-at-a-time state is its definition at every prefix, so a
+/// walk's cost does not grow with a word's length (hard rule 2: a run of
+/// letters the length of a frame must not make decode quadratic).
+#[test]
+fn words_pushed_a_byte_at_a_time_equal_their_definition_at_every_prefix() {
+    let text = b"Ab cd,  EF.gh\n12ij kl--MN op qrstuvwxyz \x00\xffzz"
+        .iter()
+        .copied()
+        .chain(
+            random_bytes(23, 400)
+                .iter()
+                .map(|b| b"aZ .9"[usize::from(*b) % 5]),
+        )
+        .collect::<Vec<u8>>();
+    let mut words = Words::new();
+    for end in 0..=text.len() {
+        let prefix = &text[..end];
+        assert_eq!(words.word, word_by_scan(prefix), "word after {end} bytes");
+        assert_eq!(
+            words.bigram,
+            bigram_by_scan(prefix),
+            "bigram after {end} bytes"
+        );
+        if let Some(&b) = text.get(end) {
+            words.push(b);
+        }
+    }
+}
+
+#[test]
+fn the_word_context_folds_case_and_keys_on_the_byte_before() {
+    assert_eq!(words_after(b"x Cat").word, words_after(b"x cAT").word);
+    assert_ne!(words_after(b"x cat").word, words_after(b"-cat").word);
+    assert_eq!(
+        words_after(b"one.").word,
+        words_after(b"two.").word,
+        "a non-letter starts a fresh word"
+    );
+}
+
+#[test]
+fn the_word_pair_skips_the_gap_and_forgets_the_word_before_the_pair() {
+    assert_eq!(
+        words_after(b"the, cat").bigram,
+        words_after(b"THE cat").bigram
+    );
+    assert_eq!(
+        words_after(b"a the cat").bigram,
+        words_after(b"b the cat").bigram
+    );
+    assert_ne!(
+        words_after(b"the cat").bigram,
+        words_after(b"dog cat").bigram
+    );
+    assert_eq!(
+        words_after(b"the cat ").bigram,
+        words_after(b"cat:").bigram,
+        "once a word ends it is the previous one, the current empty"
+    );
+}
+
+/// [`Records`] after pushing every byte of `prefix`.
+fn records_after(prefix: &[u8]) -> Records {
+    let mut records = Records::new();
+    for &b in prefix {
+        records.push(b);
+    }
+    records
+}
+
+/// A length needs four evenly spaced occurrences of one value, three equal
+/// gaps; three occurrences, unequal gaps or a run (gap one) set none.
+#[test]
+fn a_record_length_is_three_equal_gaps_above_one() {
+    assert_eq!(records_after(b"x..x..x..").length, 0, "two gaps");
+    assert_eq!(records_after(b"x..x..x..x").length, 3);
+    assert_eq!(records_after(b"x..x...x..x").length, 0, "unequal gaps");
+    assert_eq!(records_after(b"aaaaaaaa").length, 0, "a run is no record");
+    assert_eq!(
+        records_after(b"x..x..x..x.y.y.y.y").length,
+        2,
+        "the latest detection wins"
+    );
+}
+
+/// A length is a gap between two pushed bytes, so it never reaches past
+/// the prefix, and [`Records::above`] reads the byte one or two lengths
+/// back or `0` where the prefix is too short.
+#[test]
+fn above_reads_whole_records_back_or_nothing() {
+    let prefix = b"ab-ab-ab-ab-";
+    let records = records_after(prefix);
+    assert_eq!(records.length, 3);
+    assert!(records.length <= records.seen);
+    assert_eq!(records.above(prefix, 1), u64::from(b'a') + 1);
+    assert_eq!(records.above(prefix, 2), u64::from(b'a') + 1);
+    assert_eq!(
+        records.above(&prefix[..4], 2),
+        0,
+        "two records reach before the start"
+    );
+    assert_eq!(Records::new().above(prefix, 1), 0, "no length, no column");
+}
+
+/// The column is the predicted byte's position modulo the record length,
+/// counted from the stream's start, and `0` before any length is known.
+#[test]
+fn a_column_counts_positions_modulo_the_record_length() {
+    assert_eq!(Records::new().column(), 0);
+    assert_eq!(records_after(b"x..x..x..").column(), 0, "no length yet");
+    let prefix = b"ab-ab-ab-ab-";
+    for extra in 0..6 {
+        let records = records_after(&[prefix.as_slice(), &b"ab-ab-"[..extra]].concat());
+        assert_eq!(records.length, 3);
+        assert_eq!(records.column(), (extra % 3) as u64, "after {extra} more");
+    }
+}
+
+/// [`Indirect`] after pushing every byte of `prefix`.
+fn indirect_after(prefix: &[u8]) -> Indirect {
+    let mut indirect = Indirect::try_new().expect("constant sizes");
+    for &b in prefix {
+        indirect.push(b);
+    }
+    indirect
+}
+
+/// Each table holds the two bytes that followed its key's last two
+/// occurrences, the latest lowest, by its definition: a scan of the prefix.
+#[test]
+fn indirect_tables_hold_what_followed_each_key_by_their_definition() {
+    // No zero byte, which the state's start reads as preceding the stream.
+    let noise: Vec<u8> = random_bytes(29, 600)
+        .into_iter()
+        .map(|b| b.max(1))
+        .collect();
+    let text = [b"abcabdabcxab".as_slice(), &noise].concat();
+    let followers = |prefix: &[u8], key: &[u8]| -> u16 {
+        let n = key.len();
+        let mut after = 0u16;
+        for i in n..prefix.len() {
+            if prefix[i - n..i] == *key {
+                after = (after << 8) | u16::from(prefix[i]);
+            }
+        }
+        after
+    };
+    for end in 0..=text.len() {
+        let prefix = &text[..end];
+        let indirect = indirect_after(prefix);
+        let (one, two, three) = indirect.keys();
+        if end >= 1 {
+            assert_eq!(usize::from(prefix[end - 1]), one);
+            assert_eq!(
+                indirect.after_byte[one],
+                followers(prefix, &prefix[end - 1..])
+            );
+        }
+        if end >= 2 {
+            assert_eq!(
+                usize::from(u16::from_le_bytes([prefix[end - 1], prefix[end - 2]])),
+                two
+            );
+            assert_eq!(
+                indirect.after_pair[two],
+                followers(prefix, &prefix[end - 2..])
+            );
+        }
+        assert!(three < 1 << INDIRECT_TRIPLE_BITS);
+    }
+    let indirect = indirect_after(b"abcabdabcxab");
+    assert_eq!(
+        indirect.after_byte[usize::from(b'b')],
+        u16::from_le_bytes(*b"cd"),
+        "after b: d, then c most recently"
+    );
+}
+
+/// The triple table keys on the last three bytes alone, so two prefixes
+/// ending alike, whatever came before, read one entry.
+#[test]
+fn the_indirect_contexts_key_on_their_last_bytes_alone() {
+    let a = indirect_after(b"qqqq-xyz");
+    let b = indirect_after(b"rr-xyz");
+    assert_eq!(a.keys(), b.keys());
+    assert_ne!(a.hashes(), indirect_after(b"rr-xyw").hashes());
+    assert_eq!(
+        indirect_after(b"\xa1\xb2\xc3\xd4").high_nibbles(),
+        indirect_after(b"\x77\xaf\xbe\xcd\xdc").high_nibbles(),
+        "only the last four bytes' high nibbles count"
+    );
+}
+
+#[test]
+fn byte_back_tells_a_zero_byte_from_absence() {
+    assert_eq!(byte_back(&[0], 1), 1);
+    assert_eq!(byte_back(&[7, 0], 2), 8);
+    assert_eq!(byte_back(&[0], 2), 0);
+    assert_eq!(byte_back(&[], 1), 0);
+}
+
+/// The last row [`CmPath::walk`] can address in each [`Calibration`]
+/// table exists: node 255 under the longest match bucket predicting a one,
+/// the last byte 255, the order-2 hash's top row, and the longest order.
+#[test]
+fn every_calibration_row_a_walk_can_name_is_in_its_table() {
+    let mut calibration = Calibration::try_new().expect("constant sizes");
+    let last_node = BYTE_NODES - 1;
+    let last_match_state = (LENGTH_BUCKETS - 1) * 2 + 1 + 1;
+    let rows = [
+        last_node,
+        255 * BYTE_NODES + last_node,
+        ((1 << APM_ORDER2_BITS) - 1) * BYTE_NODES + last_node,
+        last_match_state * BYTE_NODES + last_node,
+        (ORDER_CLASSES - 1) * BYTE_NODES + last_node,
+    ];
+    let p = calibration.refine(rows, 0.3);
+    assert!((PROBABILITY_FLOOR..=1.0 - PROBABILITY_FLOOR).contains(&p));
+    calibration.update(rows, 0.3, true);
+    assert!(
+        calibration.refine(rows, 0.3) > p,
+        "a one moves every row up"
+    );
+}
+
+/// The seen order is the longest of the [`ORDERS`] whose slot at the node
+/// has learned, read from the buckets the nibble claimed: none on fresh
+/// tables, every order once each has learned, and only the orders whose
+/// context recurs when a new nibble keeps the short ones and changes the
+/// rest.
+#[test]
+fn the_seen_order_is_the_longest_order_that_has_learned_here() {
+    let mut contexts = Contexts::try_new().expect("constant sizes");
+    let hashes: [u64; CONTEXTS] = std::array::from_fn(|i| mix64(i as u64));
+    contexts.claim_nibble(&hashes, 1);
+    assert_eq!(contexts.longest_seen_order(1), 0);
+    contexts.update(1, true);
+    assert_eq!(contexts.longest_seen_order(1), ORDERS.len());
+    assert_eq!(contexts.longest_seen_order(2), 0, "node 2 has not learned");
+
+    let mut changed = hashes;
+    for h in &mut changed[2..] {
+        *h = mix64(!*h);
+    }
+    contexts.claim_nibble(&changed, 1);
+    assert_eq!(
+        contexts.longest_seen_order(1),
+        2,
+        "orders 2 and 3 recur, the rest are fresh"
     );
 }
 

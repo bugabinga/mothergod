@@ -1,4 +1,4 @@
-# mothergod bitstream format (FORMAT_VERSION 19)
+# mothergod bitstream format (FORMAT_VERSION 22)
 
 Status: **normative, versioned** (ADR-0050). This document describes the
 current code; code and spec change in the same PR, and evolution adds a
@@ -16,7 +16,7 @@ first version a 1.0 build writes, no version is ever retired.
 ```
 offset  size  field
 0       4     magic: 0x4D 0x47 0x44 0x43 ("MGDC")
-4       1     format version (currently 19)
+4       1     format version (currently 22)
 5       1     method byte
 6       ...   payload (method-defined)
 end-4   4     check value: CRC-32 of every byte before it, u32 LE
@@ -44,7 +44,11 @@ the base64 filter and derived a frame's output length from its filtered
 length (ADR-0071); 15 added the reverse filter (ADR-0072); 16 added
 reverse then delta (ADR-0073); 17 declared the match reach in the selector
 (ADR-0075); 18 added the far reach, a 2-bit reach field with an offset
-alphabet of its own (ADR-0078); 19 added the `Cm` method (ADR-0079).
+alphabet of its own (ADR-0078); 19 added the `Cm` method (ADR-0079); 20
+gave its model order 2 and two word contexts (ADR-0081); 21 gave it record
+and sparse contexts and a calibration stage (ADR-0082); 22 gave it
+indirect, record-position and order-8 contexts and a seen-order mixer
+selector (ADR-0083).
 
 ## Check value (ADR-0068)
 
@@ -241,15 +245,29 @@ repeat-offset cache to reuse) is coded as a symbol through the separate
 never be misread as an offset bucket or vice versa — the shape of the
 founding port bug this section's invariant exists to rule out.
 
-### `Cm` (`src/cm_path.rs`, ADR-0079)
+### `Cm` (`src/cm_path.rs`, ADR-0079, ADR-0081, ADR-0082, ADR-0083)
 
 A trial-selected filter, from the same shortlist and with the same meaning
 as `Lz`'s, applied to the frame data, then every filtered byte coded as 8
 binary decisions through one context-mixing model (`cm_path::CmPath`): the
-`Lz` literal model's own probability, a match model's and four hashed order
-contexts' (orders 3 to 6), blended by a logistic mixer and coded over the
-same adaptive range coder. Every table has a constant size and starts fresh
-per frame. Every value is computed with IEEE basic operations and the codec's
+`Lz` literal model's own probability, a match model's and twenty hashed
+contexts': orders 2 to 6 and 8; the current word with the byte before it;
+the bytes one and two records above, and one record above with the last
+byte, where the record length is the latest gap above one at which a byte
+value recurred three times running; the previous word with the current
+one; bytes 3 and 2 back, 2 and 4 back, and 4 and 8 back; the last byte
+and the two bytes that followed its last two occurrences, the same for
+the last two bytes; the last four bytes' high nibbles; the same indirect
+context for the last three bytes; and the position within a record, alone,
+with one record above, and with one and two records above. A word is a
+run of ASCII letters taken case folded. Each hashed context enters a
+logistic mixer twice, as a logit and as its probability less one half,
+beside a constant bias input, under a weight set chosen by the match
+length's class, the longest order whose slot has learned, and the nibble.
+The mixed probability is refined by five calibration tables keyed beside
+the bit's tree node on nothing, the last byte, the order-2 hash, the match
+model's state and that longest order, then coded over the same adaptive
+range coder. Every table has a constant size and starts fresh per frame. Every value is computed with IEEE basic operations and the codec's
 own `stretch` and `squash`, never a libm call (ADR-0024).
 
 ```
@@ -310,8 +328,9 @@ streams.
   measured against; `research/JOURNAL.md` S1-P7, S2-A71). A `Cm` frame's
   output is capped lower, at 16 MiB (`cm_path::MAX_OUTPUT_LEN`), as
   `TooLarge` from its declared length before any allocation, because its
-  decode costs about 5 µs per output byte whatever the stream: 88 s
-  measured at that cap against `Lz`'s 314 s at 256 MiB (ADR-0079). The
+  decode pays a full model walk per output byte whatever the stream; the
+  measured cost at that cap is in `cm_path::MAX_OUTPUT_LEN`'s
+  documentation (ADR-0079). The
   cap is the block length `mothergod::compress` cuts at, so it refuses no
   frame this encoder writes.
 - Bit-identical output across platforms for the same input and version:
