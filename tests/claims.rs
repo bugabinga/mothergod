@@ -5,7 +5,8 @@
 //! encode/decode MB/s and `xz -9e`'s beside them, the benchmark CPU model, the per-file win count and the files named behind it, each encoder level's Silesia cost, the
 //! measurement date, the
 //! reference compressor
-//! versions, the pre-alpha/no-release state of the project, and the CLI
+//! versions, the pre-alpha/no-release state of the project, the platforms
+//! the weekly suite runs on, and the CLI
 //! recipe a reader is told to type and the line its first run prints, instead of
 //! deriving any of them, so a codec change, a report regeneration, a
 //! release or a
@@ -21,7 +22,8 @@
 //! `FORMAT_VERSION` against `src/lib.rs`'s own constant, the aggregate
 //! figures, date and tool versions against the matching generated
 //! `docs/benchmarks/*.md` report, the release state against
-//! `CHANGELOG.md`'s own headings, the recipe against the binary's own
+//! `CHANGELOG.md`'s own headings, the platforms against
+//! `docs/TESTING.md`'s lane table, the recipe against the binary's own
 //! usage output, and fails naming the file, the claimed value, and the
 //! true value.
 //!
@@ -47,6 +49,7 @@
 #![cfg(not(any(miri, target_os = "android")))]
 
 use std::cmp::Ordering;
+use std::collections::BTreeSet;
 use std::ops::Range;
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
@@ -67,6 +70,7 @@ const INPUTS: &[&str] = &[
     "LICENSE",
     "bench/corpus.toml",
     "research/progress.jsonl",
+    "docs/TESTING.md",
     "docs/benchmarks/",
     "fuzz/fuzz_targets/",
     "site/",
@@ -1537,6 +1541,113 @@ fn published_first_run_transcript_matches_what_the_binary_prints() {
         assert_eq!(
             claimed, truth,
             "{surface_file} quotes `{claimed}` for `mothergod -v -c LICENSE`; the binary prints `{truth}`"
+        );
+    }
+}
+
+/// An OS family and an architecture word, as both the lane table and the
+/// "Try it" sentences can be read into: `("Linux", "ARM64")`.
+type Platform = (String, &'static str);
+
+/// The platforms the weekly lane table in `docs/TESTING.md` runs. The
+/// family is the Runtime column's first word; the architecture comes from
+/// the Rust target column, because the Runtime column spells x64 three ways
+/// (`x64`, `Intel`, `x86-64`) and the target spells it one.
+fn lane_platforms() -> BTreeSet<Platform> {
+    const HEADER: &str = "| Runtime | Hosted runner | Rust target |";
+    let testing = read("docs/TESTING.md");
+    let (_, table) = testing
+        .split_once(HEADER)
+        .unwrap_or_else(|| panic!("docs/TESTING.md has no lane table headed {HEADER:?}"));
+    let lanes: BTreeSet<Platform> = table
+        .lines()
+        // The header line's empty remainder, then the separator row.
+        .skip(2)
+        .take_while(|line| line.starts_with('|'))
+        .map(|row| {
+            let cells: Vec<&str> = row.split('|').map(str::trim).collect();
+            let [_, runtime, _, target, _] = cells[..] else {
+                panic!("docs/TESTING.md's lane row {row:?} is not `| runtime | runner | target |`")
+            };
+            let family = runtime
+                .split_whitespace()
+                .next()
+                .unwrap_or_else(|| panic!("docs/TESTING.md's lane row {row:?} names no runtime"));
+            let arch = match target.trim_matches('`').split('-').next() {
+                Some("x86_64") => "x64",
+                Some("aarch64") => "ARM64",
+                _ => panic!(
+                    "docs/TESTING.md's lane {runtime:?} builds {target}, an architecture the \"Try it\" sentences have no word for; name it there and here"
+                ),
+            };
+            (family.to_owned(), arch)
+        })
+        .collect();
+    assert!(
+        !lanes.is_empty(),
+        "docs/TESTING.md's lane table under {HEADER:?} has no rows"
+    );
+    lanes
+}
+
+/// The platforms a "Try it" sentence in `file` claims the suite runs on.
+/// Its shape is "The test suite runs weekly on A, B and C, each on x64 and
+/// ARM64, and on D and E, x64 only;", read up to the semicolon, so a
+/// reworded sentence fails here naming the shape instead of passing on
+/// words found further down the page.
+fn claimed_platforms(file: &str) -> BTreeSet<Platform> {
+    const OPENER: &str = "The test suite runs weekly on ";
+    const BOTH: &str = ", each on x64 and ARM64, and on ";
+    const X64_ONLY: &str = ", x64 only";
+    let text = normalize_whitespace(&read(file));
+    let shape = || {
+        format!(
+            "{file} no longer reads \"{OPENER}<families>{BOTH}<families>{X64_ONLY};\"; reword this parser with the sentence"
+        )
+    };
+    let (_, rest) = text
+        .split_once(OPENER)
+        .unwrap_or_else(|| panic!("{}", shape()));
+    let sentence = rest.split(';').next().unwrap_or_default();
+    let (both, rest) = sentence
+        .split_once(BOTH)
+        .unwrap_or_else(|| panic!("{}", shape()));
+    let x64_only = rest
+        .strip_suffix(X64_ONLY)
+        .unwrap_or_else(|| panic!("{}", shape()));
+    let families = |list: &str| -> Vec<String> {
+        list.split(", ")
+            .flat_map(|part| part.split(" and "))
+            .map(str::to_owned)
+            .collect()
+    };
+    let mut claimed = BTreeSet::new();
+    for family in families(both) {
+        claimed.insert((family.clone(), "x64"));
+        claimed.insert((family, "ARM64"));
+    }
+    for family in families(x64_only) {
+        claimed.insert((family, "x64"));
+    }
+    claimed
+}
+
+#[test]
+fn try_it_platforms_match_the_lane_table() {
+    // Both "Try it" sections restate the weekly lane table's platforms by
+    // hand (issue #1771). #1731 added the FreeBSD lane and both sentences
+    // kept reading "and on Android x64" until #1770 fixed them: a platform
+    // left out reads as untested to someone deciding whether to clone, and
+    // one named without a lane is a claim no run makes. So the sentence
+    // and the table hold the same (family, architecture) pairs, both ways.
+    let lanes = lane_platforms();
+    for file in ["README.md", "site/index.html"] {
+        let claimed = claimed_platforms(file);
+        let unnamed: Vec<&Platform> = lanes.difference(&claimed).collect();
+        let unrun: Vec<&Platform> = claimed.difference(&lanes).collect();
+        assert!(
+            unnamed.is_empty() && unrun.is_empty(),
+            "{file}'s \"Try it\" sentence leaves out lanes docs/TESTING.md runs: {unnamed:?}; and names lanes it does not run: {unrun:?}"
         );
     }
 }
