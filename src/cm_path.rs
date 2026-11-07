@@ -1,26 +1,34 @@
 //! A context-mixing path over every byte, no LZ tokens: charter #1763's
 //! candidate (`research/JOURNAL.md` S2-A133 to S2-A138, ADR-0077), its
-//! contexts widened by S2-A150 (ADR-0081), coded
+//! contexts widened by S2-A150 (ADR-0081) and S2-A151 (ADR-0082), coded
 //! through the real range coder.
 //!
-//! Per bit-tree node of each byte, an outer logistic mixer blends:
+//! Per bit-tree node of each byte, an outer logistic mixer blends, and four
+//! calibration tables refine what it says:
 //!
 //! ```text
 //!   Literal (six experts, SurpriseLogisticMix, LogitSse) ─ p ─┐
 //!   match model: predicted byte, confirmed length ───────── p ─┤
-//!   hashed order-2 context, per node ────────────────────── p ─┤ stretch,
-//!   hashed order-3 ─────────────────────────────────────── p ─┤ weighted sum,
-//!   hashed order-4 ─────────────────────────────────────── p ─┤ squash ─> p
-//!   hashed order-5 ─────────────────────────────────────── p ─┤
-//!   hashed order-6 ─────────────────────────────────────── p ─┤
-//!   hashed word: its letters and the byte before ───────── p ─┤
-//!   hashed word pair: the previous word's and this one's ─ p ─┘
+//!   hashed orders 2 to 6, per node, one input each ──────── p ─┤
+//!   hashed word: its letters and the byte before ───────── p ─┤ stretch,
+//!   hashed record column: 1 and 2 records above ────────── p ─┤ weighted sum,
+//!   hashed record row: 1 record above, the last byte ───── p ─┤ squash ─> p
+//!   hashed word pair: the previous word's and this one's ─ p ─┤
+//!   hashed sparse: bytes 3 and 2 back ──────────────────── p ─┤
+//!   hashed sparse: bytes 2 and 4 back ──────────────────── p ─┤
+//!   hashed sparse: bytes 4 and 8 back ──────────────────── p ─┘
+//!
+//!   p ─┬─ APM by node ───────────────── a0 ─┐
+//!      ├─ APM by last byte, node ─────── a1 ─┤ ((p + 3 a0) / 4
+//!      ├─ APM by order-2 hash, node ──── a2 ─┤   + a1 + a2 + a3) / 4 ─> coder
+//!      └─ APM by match state, node ───── a3 ─┘
 //! ```
 //!
 //! The first input is the shipped wire model's own refined probability,
 //! [`Literal::walk_logit_sse`], and a fresh mixer weighs it 1 and every
-//! other input 0, so the path starts as the wire model and the mixer only
-//! adds what it learns pays.
+//! other input 0, so the mixer starts as the wire model and only adds what
+//! it learns pays; a fresh calibration table maps a probability to itself
+//! within its interpolation error.
 //!
 //! A [`crate::Method::Cm`] frame carries it, written at
 //! [`crate::Level::Extreme`] when smaller than the hybrid's (ADR-0079).
@@ -49,6 +57,7 @@ use crate::codec::{self, Extent, MAX_DECODED_LEN, SELECTOR_LEN};
 use crate::coder::{Decoder, Encoder};
 use crate::filters::{self, select::Candidate};
 use crate::literal::{Context, Literal, SurpriseLogisticMix};
+use crate::sse::LogitSse;
 use crate::{Error, fan_out, logistic, try_filled_vec};
 
 /// The most bytes one [`crate::Method::Cm`] frame, and one [`decode`],
@@ -94,8 +103,10 @@ const MAX_EXPANSION: u32 = 4096;
 )]
 const PROBABILITY_FLOOR: f64 = 1.0 / MAX_EXPANSION as f64;
 
-/// The outer mixer's gradient step.
-const MIXER_RATE: f64 = 0.005;
+/// The outer mixer's gradient step: 0.0035 and 0.007 tried against 0.005
+/// with this input set, and the faster step kept (`research/JOURNAL.md`
+/// S2-A151).
+const MIXER_RATE: f64 = 0.007;
 
 /// A [`Counter`] slot's rate is `1 / (count + 1.5)`, its count capped
 /// here, so a slot's adaptation slows to this floor and no further.
@@ -151,9 +162,36 @@ const WEIGHT_SETS: usize = LENGTH_BUCKETS * 2;
 /// hashed contexts.
 const INPUTS: usize = 2 + CONTEXTS;
 
-/// Hashed context tables, in mixer order: the [`ORDERS`], then the word
-/// and the word pair, [`Words`].
-const CONTEXTS: usize = ORDERS.len() + 2;
+/// Hashed context tables, in mixer order: the [`ORDERS`], [`Words::word`],
+/// the record column and row ([`Records`]), [`Words::bigram`], then the
+/// three sparse contexts, [`SPARSE_SEEDS`]. The order is part of the
+/// format: the mixer's dot product sums its terms in it.
+const CONTEXTS: usize = ORDERS.len() + 7;
+
+/// Seeds of the record column context, the bytes one and two records
+/// above, and of the record row context, one record above and the last
+/// byte, so the two never share a hash.
+const RECORD_COLUMN_SEED: u64 = 0x5ecb;
+const RECORD_ROW_SEED: u64 = 0x5eca;
+
+/// The sparse contexts, paq8's sparse model (`research/JOURNAL.md`
+/// S2-A151): bytes 3 and 2 back, skipping the last; bytes 2 and 4 back, a
+/// 16-bit column; bytes 4 and 8 back, a 32-bit column. Each its seed, in
+/// mixer order.
+const SPARSE_SEEDS: [u64; 3] = [0x5ba7, 0x5ba8, 0x5ba9];
+
+/// Contexts of [`CmPath`]'s first calibration table: the byte's bit-tree
+/// node, `1..BYTE_NODES`.
+const BYTE_NODES: usize = 256;
+
+/// Bits of the order-2 hash that key the third calibration table, beside
+/// the node.
+const APM_ORDER2_BITS: u32 = 8;
+
+/// Match states keying the fourth calibration table, beside the node: `0`
+/// while no prediction speaks at the node, else one past the match
+/// model's confidence slot, `bucket * 2 + predicted bit`.
+const MATCH_STATES: usize = LENGTH_BUCKETS * 2 + 1;
 
 fn clamp(p: f64) -> f64 {
     p.clamp(PROBABILITY_FLOOR, 1.0 - PROBABILITY_FLOOR)
@@ -476,6 +514,78 @@ impl Words {
     }
 }
 
+/// The byte `back` positions before the end of `prefix`, plus one, or `0`
+/// when the prefix is shorter: a context key in which absence is its own
+/// value. `back` is at least one.
+fn byte_back(prefix: &[u8], back: usize) -> u64 {
+    prefix
+        .len()
+        .checked_sub(back)
+        .map_or(0, |i| u64::from(prefix[i]) + 1)
+}
+
+/// paq8's record model (`research/JOURNAL.md` S2-A151): a record length
+/// read off the stream, the gap at which one byte value has recurred
+/// three times running, so a fixed-width record's bytes can be predicted
+/// from the same column of the records above.
+///
+/// Invariant: as for [`Words`], [`Self::push`] has seen every byte of the
+/// prefix in order, once. `length` never exceeds the bytes pushed, so it
+/// indexes the prefix wherever [`byte_back`] reads with it.
+#[derive(Debug, Clone)]
+struct Records {
+    /// Bytes pushed so far: the 1-based position of the last one.
+    seen: usize,
+    /// Each byte value's last 1-based position, `0` while unseen.
+    last: [usize; 256],
+    /// Each byte value's last gap between two occurrences, `0` until it
+    /// has one.
+    gap: [usize; 256],
+    /// The gap before [`Self::gap`].
+    gap_before: [usize; 256],
+    /// The latest gap above one that a byte value repeated at three times
+    /// running, four evenly spaced occurrences; `0` until one has.
+    length: usize,
+}
+
+impl Records {
+    fn new() -> Self {
+        Self {
+            seen: 0,
+            last: [0; 256],
+            gap: [0; 256],
+            gap_before: [0; 256],
+            length: 0,
+        }
+    }
+
+    /// Folds in the prefix's next byte.
+    fn push(&mut self, byte: u8) {
+        self.seen += 1;
+        let b = usize::from(byte);
+        let gap = if self.last[b] > 0 {
+            self.seen - self.last[b]
+        } else {
+            0
+        };
+        if gap > 1 && gap == self.gap[b] && gap == self.gap_before[b] {
+            self.length = gap;
+        }
+        self.gap_before[b] = self.gap[b];
+        self.gap[b] = gap;
+        self.last[b] = self.seen;
+    }
+
+    /// [`byte_back`] of the byte `records` record lengths before the one
+    /// being predicted, `0` while no length is known.
+    fn above(&self, prefix: &[u8], records: usize) -> u64 {
+        match self.length {
+            0 => 0,
+            length => byte_back(prefix, length.saturating_mul(records)),
+        }
+    }
+}
+
 /// The hashed contexts: one [`Bucket`] table per [`ORDERS`] entry, then
 /// [`Words::word`]'s and [`Words::bigram`]'s, and the bucket each currently
 /// owns for the nibble being walked.
@@ -527,16 +637,55 @@ impl Contexts {
     }
 }
 
+/// The four calibration tables after the outer mixer, lpaq1's APM stage
+/// widened (`research/JOURNAL.md` S2-A151): each refines the mixer's
+/// probability in its own context beside the byte's bit-tree node.
+#[derive(Debug, Clone)]
+struct Calibration {
+    /// `[node, last byte, order-2 hash, match state]`, in the order
+    /// [`Self::refine`] blends them.
+    tables: [LogitSse; 4],
+}
+
+impl Calibration {
+    fn try_new() -> Result<Self, std::collections::TryReserveError> {
+        Ok(Self {
+            tables: [
+                LogitSse::try_new(BYTE_NODES)?,
+                LogitSse::try_new(256 * BYTE_NODES)?,
+                LogitSse::try_new((1 << APM_ORDER2_BITS) * BYTE_NODES)?,
+                LogitSse::try_new(MATCH_STATES * BYTE_NODES)?,
+            ],
+        })
+    }
+
+    /// The probability coded at a node: `p` refined by each table at its
+    /// row in `rows`, blended `((p + 3 a0) / 4 + a1 + a2 + a3) / 4`.
+    fn refine(&self, rows: [usize; 4], p: f64) -> f64 {
+        let [a0, a1, a2, a3] = [0, 1, 2, 3].map(|i| self.tables[i].refine(rows[i], p));
+        clamp(((p + 3.0 * a0) / 4.0 + a1 + a2 + a3) / 4.0)
+    }
+
+    fn update(&mut self, rows: [usize; 4], p: f64, bit: bool) {
+        for (table, row) in self.tables.iter_mut().zip(rows) {
+            table.update(row, p, bit);
+        }
+    }
+}
+
 /// The path's model: [`Literal`]'s wire walk plus the match model and the
-/// hashed contexts under one outer logistic mixer. Fresh per stream.
+/// hashed contexts under one outer logistic mixer, then [`Calibration`].
+/// Fresh per stream.
 #[derive(Debug, Clone)]
 pub struct CmPath {
     literal: Literal,
     literal_mixer: SurpriseLogisticMix,
     match_model: MatchModel,
     words: Words,
+    records: Records,
     contexts: Contexts,
     weights: Vec<[f64; INPUTS]>,
+    calibration: Calibration,
 }
 
 impl Default for CmPath {
@@ -564,9 +713,38 @@ impl CmPath {
             literal_mixer: SurpriseLogisticMix::try_new()?,
             match_model: MatchModel::try_new()?,
             words: Words::new(),
+            records: Records::new(),
             contexts: Contexts::try_new()?,
             weights: try_filled_vec(WEIGHT_SETS, start)?,
+            calibration: Calibration::try_new()?,
         })
+    }
+
+    /// Every hashed context's key for the byte after `prefix`, in mixer
+    /// order ([`CONTEXTS`]), once [`Self::words`] and [`Self::records`]
+    /// have seen the prefix's last byte.
+    fn context_hashes(&self, prefix: &[u8]) -> [u64; CONTEXTS] {
+        let mut hashes = [0; CONTEXTS];
+        for (h, order) in hashes.iter_mut().zip(ORDERS) {
+            *h = hash_bytes(order as u64, &prefix[prefix.len().saturating_sub(order)..]);
+        }
+        let length = self.records.length as u64;
+        let above = self.records.above(prefix, 1);
+        let n = prefix.len();
+        let [skip_one, stride_two, stride_four] = SPARSE_SEEDS;
+        let derived = [
+            self.words.word,
+            mix64(
+                mix64(mix64(RECORD_COLUMN_SEED ^ length) ^ above) ^ self.records.above(prefix, 2),
+            ),
+            mix64(mix64(mix64(RECORD_ROW_SEED ^ length) ^ above) ^ byte_back(prefix, 1)),
+            self.words.bigram,
+            hash_bytes(skip_one, &prefix[n.saturating_sub(3)..n.saturating_sub(1)]),
+            mix64(mix64(stride_two ^ byte_back(prefix, 2)) ^ byte_back(prefix, 4)),
+            mix64(mix64(stride_four ^ byte_back(prefix, 4)) ^ byte_back(prefix, 8)),
+        ];
+        hashes[ORDERS.len()..].copy_from_slice(&derived);
+        hashes
     }
 
     /// One byte's walk after `prefix` under `context`, the step [`encode`],
@@ -584,20 +762,20 @@ impl CmPath {
         let predicted = self.match_model.predict(prefix);
         if let Some(&last) = prefix.last() {
             self.words.push(last);
+            self.records.push(last);
         }
-        let mut hashes = [self.words.word; CONTEXTS];
-        for (h, order) in hashes.iter_mut().zip(ORDERS) {
-            *h = hash_bytes(order as u64, &prefix[prefix.len().saturating_sub(order)..]);
-        }
-        hashes[CONTEXTS - 1] = self.words.bigram;
+        let hashes = self.context_hashes(prefix);
         let Self {
             literal,
             literal_mixer,
             match_model,
             contexts,
             weights,
+            calibration,
             ..
         } = self;
+        let last_byte_row = usize::from(prefix.last().copied().unwrap_or(0)) * BYTE_NODES;
+        let order2_row = slot(hashes[0], APM_ORDER2_BITS) * BYTE_NODES;
 
         let (mut lo, mut hi, mut node) = (0usize, 256usize, 1usize);
         let mut nibble_node = 1usize;
@@ -628,7 +806,15 @@ impl CmPath {
             let w = &mut weights[set];
             let dot: f64 = w.iter().zip(&inputs).map(|(w, x)| w * x).sum();
             let p = clamp(logistic::squash(dot));
-            let bit = code_bit(mid, p);
+            let match_state = confidence_slot.map_or(0, |s| s + 1);
+            let rows = [
+                node,
+                last_byte_row + node,
+                order2_row + node,
+                match_state * BYTE_NODES + node,
+            ];
+            let bit = code_bit(mid, calibration.refine(rows, p));
+            calibration.update(rows, p, bit);
 
             let error = f64::from(u8::from(bit)) - p;
             for (w, x) in w.iter_mut().zip(&inputs) {
