@@ -73,8 +73,8 @@ release.
   `-4` is 12.2% smaller than `-3` at 3.1x its encode time and 14.5x its
   decode time; on Canterbury, 15.1% smaller at 4.6x and 9.9x. A decoder
   refuses such a frame past 16 MiB of output, which caps a hostile one's
-  decode at about 205 s on the 4-core runner the benchmarks name, as the
-  model stands after the two `-4` entries under Changed.
+  decode at about 180 s on a 4-core AMD EPYC 9V45 runner, as the model
+  stands after the three `-4` entries under Changed.
   `-1` to `-3` write what they wrote.
   `FORMAT_VERSION` 18 to 19, ADR-0079 (#1825).
 - site: mothergod.dev/decisions renders the ADR series from `docs/adr/`,
@@ -238,7 +238,7 @@ release.
   of 50,000. Decoding such a frame takes about 29% longer.
   `-1` to `-3` write what they wrote. A file an earlier build wrote no
   longer decodes and must be re-compressed. `FORMAT_VERSION` 21 to 22,
-  ADR-0083.
+  ADR-0083 (#1912).
 - cli, library: `-4` writes smaller context-mixing frames on records,
   sampled audio and text, because its model also reads the bytes a record
   above, sparse byte columns and four calibration tables: 0.082 bits/byte
