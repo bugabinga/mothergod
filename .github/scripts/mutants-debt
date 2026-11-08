@@ -23,7 +23,10 @@ as "no survivors" and merged. So the listing is read against the outcomes
 by name, and every line this script prints ends in `undecided N of M`: N
 mutants the run listed and never decided, M it listed. Zero is the
 liveness signal; a decode-safety undecided mutant is debt in the same
-sense as a survivor and is filed with them.
+sense as a survivor and is filed with them. A non-zero N is also the run's
+one `::notice` annotation (`cut_notice`), because the mutate step
+interrupts cargo-mutants at its budget and stays green (#1939), so the
+checks tab would otherwise read a partial run as complete.
 
 Run as the mutants job's last step, after the report exists:
 
@@ -61,7 +64,7 @@ unreadable PR state or a failed filing exits 1 so the run's red says why,
 because printing the survivors to a log nobody opens is the exact failure
 this script exists to end.
 
-`triage`, `decide`, `render` and `in_territory` are pure so
+`triage`, `decide`, `render`, `cut_notice` and `in_territory` are pure so
 mutants-debt.test.mjs can pin both failure directions without spawning gh;
 `read_report` reads the three files cargo-mutants leaves and nothing else.
 `in_territory`, `decide_command` and `answers` are the territory rule, the
@@ -244,6 +247,21 @@ def read_report(out_dir):
     return missed, undecided, len(listed)
 
 
+def cut_notice(debt):
+    """The never-run count as a `::notice`, or "" when every listed mutant was decided.
+
+    The mutate step interrupts cargo-mutants at its budget and stays green
+    (#1939), so this annotation is where a reader of the checks tab learns
+    the run was partial; `missed.txt` alone reads as clean.
+    """
+    if not debt.never_ran:
+        return ""
+    return (
+        f"::notice::{debt.never_ran} of {debt.generated} mutants never ran: "
+        "the mutate step's budget cut them; undecided, not counted against this diff"
+    )
+
+
 def decide(debt, merged, filed):
     """The verdict and its one-line reason.
 
@@ -377,6 +395,9 @@ def main():
 
     debt = triage(*read_report(out_dir))
     liveness = f"undecided {debt.never_ran} of {debt.generated}"
+    notice = cut_notice(debt)
+    if notice:
+        print(notice)
     merged = filed = None
     err = None
     if debt.owed:

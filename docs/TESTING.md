@@ -347,7 +347,10 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   created one goes red and names it, so the reviewer reads it on the diff.
 - Timeouts do not red a PR: a mutant whose test run hangs is undecided, not
   evidence of a missing test. The verdict reads `mutants.out/missed.txt`,
-  never the exit code, which conflates the two.
+  never the exit code, which conflates the two. Nor does the budget: the
+  mutate step interrupts `cargo-mutants` at 55 minutes and stays green,
+  and the mutants it never reached are undecided, annotated on the run by
+  `mutants-debt` (#1939).
 - Advisory, not a required check, until four weeks pass with no false
   positive. Missed mutants appear as annotations on the changed lines.
 - Mutants no test can decide are excluded in `tests/mutants.toml`, each
