@@ -128,7 +128,13 @@ runs:
       uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         key: ${{ steps.resolve.outputs.toolchain }}-${{ inputs.target }}-${{ inputs.checks }}
-        workspaces: . -> target
+        # x's own suite, the second of `cargo x test`'s three, rebuilt
+        # x's dependencies in x/target for two minutes of every test job
+        # (main's test job of 2026-11-07, 2m02s of 5.8 min): the x-cache
+        # above restores the binary alone.
+        workspaces: |
+          . -> target
+          x -> target
 
     - name: Run Rust checks
       if: ${{ inputs.checks != 'setup' }}
