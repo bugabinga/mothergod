@@ -1,0 +1,79 @@
+name: seat-bun
+description: >-
+  The Bun every claude-code-action seat runs on, restored from the
+  Actions cache instead of fetched from GitHub's release CDN on each
+  wake. The action's own install step (oven-sh/setup-bun with
+  `no-cache: true`, the action's ruling in its issue 1252) downloads
+  the zip from github.com/oven-sh/bun/releases on every run with two
+  retries inside 23 seconds, and the action skips that step when
+  `path_to_bun_executable` is set. On 2026-11-08 the release CDN
+  answered 504 for an hour and six runs died at `bun: command not
+  found` before any session started, one of them the wake the
+  operator's Telegram message dispatched (#1961). Every seat runs this
+  action first and hands its `path` output to that input;
+  seat-bun.test.mjs holds every seat to it.
+
+  Cache scope runs downhill (the workflows skill): main's seats warm
+  the key on the first wake after a miss, every branch reads it, and a
+  miss during a CDN fault is the seven-day eviction case only, which
+  the daily wakes never reach. On a miss the download retries ten
+  times over about a minute, on connection errors as well as 5xx,
+  which the action's step lacks; the checksum then holds the pin.
+
+  Invariant: `version` is the one anthropics/claude-code-action pins
+  in its `Install Bun` step at the sha the seats use (`bun-version:`
+  in its action.yml), and `sha256` is that version's
+  `bun-linux-x64.zip` line in the release's SHASUMS256.txt. A bump of
+  the action's pin re-reads both. The action's file is not in this
+  repository, so nothing here can check the match; the action warns
+  that a mismatched Bun "may cause problems".
+
+inputs:
+  version:
+    description: >-
+      Bun version. No seat passes it; the default is the pin.
+    default: "1.4.4"
+  sha256:
+    description: >-
+      SHA256 of bun-linux-x64.zip for `version`. No seat passes it;
+      the default is the pin.
+    default: bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c
+
+outputs:
+  path:
+    description: Absolute path of the Bun executable, for the action's path_to_bun_executable input.
+    value: ${{ steps.where.outputs.path }}
+
+runs:
+  using: composite
+  steps:
+    - id: cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.seat-bun
+        key: seat-bun-${{ inputs.version }}-linux-x64
+
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        SHA256: ${{ inputs.sha256 }}
+      run: |
+        set -euo pipefail
+        dir="$HOME/.seat-bun"
+        mkdir -p "$dir"
+        curl -sSfL --retry 10 --retry-all-errors --retry-delay 6 -o "$dir/bun.zip" \
+          "https://github.com/oven-sh/bun/releases/download/bun-v$VERSION/bun-linux-x64.zip"
+        echo "$SHA256  $dir/bun.zip" | sha256sum --check --quiet
+        unzip -q -j -o "$dir/bun.zip" bun-linux-x64/bun -d "$dir"
+        rm "$dir/bun.zip"
+
+    - id: where
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        bun="$HOME/.seat-bun/bun"
+        test "$("$bun" --version)" = "$VERSION"
+        echo "path=$bun" >> "$GITHUB_OUTPUT"

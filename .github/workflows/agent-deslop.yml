@@ -79,6 +79,8 @@ jobs:
               python3 .github/scripts/token-sidecar.py --path "$RUNNER_TEMP/app-token" \
               > "$RUNNER_TEMP/token-sidecar.log" 2>&1
 
+      - id: bun
+        uses: ./.github/actions/seat-bun
       - id: claude
         if: steps.guard.outputs.paused != 'true'
         uses: anthropics/claude-code-action@d535f5172dec02b204866b393d6b20b9b2aaf98d # v1
@@ -97,6 +99,7 @@ jobs:
           # Telegram credential.
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
         with:
+          path_to_bun_executable: ${{ steps.bun.outputs.path }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             Read first: .claude/skills/deslop/SKILL.md.
