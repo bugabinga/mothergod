@@ -13,8 +13,9 @@
 //!
 //! Every probability here feeds the coder, so it must be bit-exact between
 //! encoder and decoder: the arithmetic is `+ - * /`, [`f64::clamp`],
-//! [`f64::floor`] and [`crate::logistic`]'s deterministic `stretch`/`squash`,
-//! never a libm transcendental (ADR-0024).
+//! [`f64::mul_add`] (correctly rounded, so exact on every target) and
+//! [`crate::logistic`]'s deterministic `stretch`/`squash`, never a libm
+//! transcendental (ADR-0024).
 //!
 //! Consumers: [`crate::bittree`]'s binary walk ([`Sse`]) and
 //! [`crate::literal::SurpriseLogisticMix`] ([`LogitSse`]).
@@ -72,7 +73,7 @@ fn split_position(scaled: f64) -> (usize, f64) {
     // The truncating cast is `floor` for every `scaled` either spacing
     // produces: both clamp first, so `scaled` is never below `0.0`, and the
     // cast saturates a NaN or a negative to 0, where `floor` would agree
-    // anyway. Without `floor`, a baseline x86-64 build calls no libm.
+    // anyway.
     #[allow(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,

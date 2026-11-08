@@ -10532,11 +10532,15 @@ record.
   Measured, release build, AMD EPYC 9V45 runner, one process each, three
   reads: `cm_path::decode_costs_vs_hybrid` hybrid **103.5, 103.7, 103.4**
   calibration steps per byte against main's (`45e68eb`) 113.8, 114.9,
-  111.5, so 7% to 10% less; the path 1958.6, 1968.7, 2043.1 against
+  111.5, pooled means 8.7% less; the path 1958.6, 1968.7, 2043.1 against
   2081.8, 2079.0, 1987.4, inside its own spread; so `-4`'s decode reads
   18.92x, 18.98x, 19.76x the hybrid's against 18.29x, 18.09x, 17.82x.
   `baseline_gate -- speed` separately: 101.85, 103.99 against 117.20,
-  111.66, 111.38. | Verdict: **accepted** (`kind: "patch"`, null
+  111.66, 111.38. Five alternating pairs, main `e288f7f` then branch,
+  Intel Xeon Platinum 8573C runner: 109.55/101.72, 110.44/99.68,
+  114.64/99.54, 107.62/102.87, 107.73/102.82, so 4.4% to 13.2% per pair
+  and 7.9% on the pooled means; "about 8%" is what the readings carry. |
+  Verdict: **accepted** (`kind: "patch"`, null
   deltas, bytes unchanged).
   | **Not measured:** `decode_profile` on Silesia, which
   needs the runner's sudo; encode, which runs the same walk; the 840 s

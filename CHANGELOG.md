@@ -238,7 +238,7 @@ release.
 
 ### Changed
 
-- perf: decoding a `-3` frame takes 7% to 10% less time on `bench/`'s 11
+- perf: decoding a `-3` frame takes about 8% less time on `bench/`'s 11
   synthetic training cases, and every level writes the bytes it wrote
   (#1970).
 - Benchmarks: each finals report times `-4` in a frontier section of its
