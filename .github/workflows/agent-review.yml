@@ -200,6 +200,8 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         if: steps.guard.outputs.paused != 'true' && steps.stamp.outputs.stands != 'true'
 
+      - id: bun
+        uses: ./.github/actions/seat-bun
       - id: claude
         if: steps.guard.outputs.paused != 'true' && steps.stamp.outputs.stands != 'true'
         uses: anthropics/claude-code-action@d535f5172dec02b204866b393d6b20b9b2aaf98d # v1
@@ -223,6 +225,7 @@ jobs:
           # Telegram credential.
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
         with:
+          path_to_bun_executable: ${{ steps.bun.outputs.path }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # PRs authored by our own agents carry the claude[bot] actor,
           # and a residual github.token push carries github-actions[bot];
