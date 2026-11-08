@@ -128,6 +128,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
+from citation import bare_hashes, complaint, writer_present
 from footer import attribute
 from gh_retry import once
 from opener import trim
@@ -347,6 +348,14 @@ def main() -> int:
     if redactions:
         print(f"gh-comment: redacted {redactions} credential-shaped string(s) "
               "from the body; a secret reached your text (CLAUDE.md rule 10)",
+              file=sys.stderr)
+    # A bare hash is A2's defect (CLAUDE.md Voice); refused where the writer
+    # can fix it, warned where a workflow step posts a fixed body (citation.py).
+    bare = bare_hashes(body)
+    if bare:
+        if writer_present():
+            die(complaint(bare))
+        print(f"gh-comment: {complaint(bare)}; posted anyway, no writer present",
               file=sys.stderr)
     full_body, stripped = attribute(body, role)
     if stripped:
