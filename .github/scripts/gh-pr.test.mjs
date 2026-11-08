@@ -172,6 +172,22 @@ test("refuses a title over 72 characters or ending in a period: it is the squash
   assert.equal(edge.called.argv[5], "y".repeat(72));
 });
 
+// CLAUDE.md Voice A2 (citation.py): the session that wrote the bare hash is
+// refused before gh is reached; a workflow step with no writer is warned and
+// posts. CLAUDECODE is set or unset here explicitly, never inherited, so the
+// result does not depend on the shell running the suite.
+test("a bare hash is refused in a model session and warned past without one", () => {
+  const body = "The pass that contains df405fc.";
+  const session = run(["claude/x", "t"], { body, env: { CLAUDECODE: "1" } });
+  assert.equal(session.status, 1);
+  assert.equal(session.called, null);
+  assert.match(session.stderr, /bare commit hash df405fc/);
+  const step = run(["claude/x", "t"], { body, env: { CLAUDECODE: undefined } });
+  assert.equal(step.status, 0);
+  assert.match(step.called.argv[7], /^The pass that contains df405fc\./);
+  assert.match(step.stderr, /bare commit hash df405fc.*posted anyway, no writer present/);
+});
+
 // The token sidecar's file (#1687): where GH_TOKEN_FILE names it, the PR
 // opens on that token, never on the one the session started with.
 test("GH_TOKEN_FILE's token wins over GH_TOKEN: the PR opens on the sidecar's newest mint", () => {

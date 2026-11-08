@@ -14,9 +14,10 @@ present to fix the sentence (the line deny-off-voice draws).
 Bare means: 7 to 40 hex characters carrying at least one letter and one
 digit, on word boundaries, outside inline code, fenced blocks and HTML
 comments, not inside a URL or an action pin (`/` or `@` before it), not
-the first half of an `a..b` range, and not followed by ` ("`, the cited
-form. The pin exception is spelled by backticks: a pin is a literal
-identifier and rides as code, a citation is prose and carries its subject.
+either half of an `a..b` or `a...b` range, and not followed by ` ("` or
+` (“`, the cited form with straight or curly quotes. The pin exception is
+spelled by backticks: a pin is a literal identifier and rides as code, a
+citation is prose and carries its subject.
 A 64-hex verdict stamp is longer than 40 and never matches; a run id is
 decimal and never matches; a hex-only word ("effaced") carries no digit
 and never matches.
@@ -36,7 +37,8 @@ FENCE = re.compile(r"```.*?```", re.DOTALL)
 INLINE = re.compile(r"`[^`\n]*`")
 COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 HASH = re.compile(
-    r"(?<![\w/@.])(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}(?!\w)(?!\.\.)(?! \(\")"
+    r"(?<![\w/@])(?<!\.\.)(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}"
+    r"(?!\w)(?!\.\.)(?! \([\"“])"
 )
 
 

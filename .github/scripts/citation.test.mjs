@@ -38,8 +38,9 @@ test("several bare hashes come back in order, once each", () => {
   );
 });
 
-test("the cited form is not bare", () => {
+test("the cited form is not bare, with straight or curly quotes", () => {
   assert.deepEqual(bare("6ef1f88 (\"bench: frontier sections print the share (#1925)\") prints them."), []);
+  assert.deepEqual(bare("3e32118 (“bench: time -4 apart”) prints them."), []);
 });
 
 test("a backticked pin is not bare", () => {
@@ -62,7 +63,12 @@ test("a 64-hex verdict stamp, a decimal run id and a hex-only word are not bare"
   assert.deepEqual(bare(`stamp ${stamp}, run 42431032218, effaced and defaced`), []);
 });
 
-test("a range is not bare, a hash at a sentence end is", () => {
+test("neither half of a two- or three-dot range is bare, a hash at a sentence end is", () => {
   assert.deepEqual(bare("git log 5f0bb4b..61391a9 shows it."), []);
+  assert.deepEqual(bare("git diff 5f0bb4b...61391a9 shows it."), []);
   assert.deepEqual(bare("The pass that contains df405fc."), ["df405fc"]);
+});
+
+test("a single dot before a hash does not exempt it: only a range does", () => {
+  assert.deepEqual(bare("Read it.df405fc carried the fix."), ["df405fc"]);
 });
