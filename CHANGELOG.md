@@ -231,6 +231,11 @@ release.
   default level's encode and decode MB/s as a share of `xz -9e`'s in the
   same run, so how far mothergod sits from xz's speed is printed, not
   divided by hand (#1921).
+- Status page: shows, per corpus, the default level's encode and decode
+  shares of `xz -9e`'s speed beside the bar release 0.1 waits on, each
+  marked as meeting it or below it, with the date the shares last
+  moved, so whether the release's speed condition holds is read, not
+  computed (#1921).
 
 ### Changed
 

@@ -134,6 +134,28 @@ for (const [corpus, file] of [["Canterbury", "canterbury.md"], ["Silesia", "sile
     assert.match(published.moved, /^\d{4}-\d{2}-\d{2}$/);
     assert.ok(!up.problems.some((p) => p.startsWith("frontier:")), up.problems.join("\n"));
   });
+
+  test(`speed_share carries ${corpus}'s share lines as its report prints them`, () => {
+    const report = readFileSync(
+      new URL(`../../docs/benchmarks/${file}`, import.meta.url).pathname,
+      "utf-8",
+    );
+    const published = up.speed_share.corpora.find((c) => c.corpus === corpus);
+    assert.equal(published.source, `docs/benchmarks/${file}`);
+    for (const axis of ["encode", "decode"]) {
+      // The expectation is the report's own line, so a regenerated report
+      // moves both sides and the test pins only the parse.
+      const [, reference, share] = report.match(
+        new RegExp(`^${axis} rate as a share of (.+)'s: (.+)$`, "m"),
+      );
+      assert.equal(published.reference, reference, axis);
+      assert.equal(published[axis], share === "none" ? null : Number(share), axis);
+    }
+    assert.match(published.moved, /^\d{4}-\d{2}-\d{2}$/);
+    // The bar is ADR-0084's share, read by the page from this one field.
+    assert.ok(up.speed_share.bar > 0 && up.speed_share.bar <= 1, String(up.speed_share.bar));
+    assert.ok(!up.problems.some((p) => p.startsWith("speed_share:")), up.problems.join("\n"));
+  });
 }
 
 for (const half of ["cli", "lib"]) {

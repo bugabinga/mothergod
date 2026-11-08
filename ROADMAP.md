@@ -132,8 +132,8 @@ reference because it is the slowest level the field ships; half, because
 a user weighing the field's slowest level against a smaller output accepts
 a factor of two and not an order of magnitude. The bar is the operator's
 to move, and its reading is the two share lines each finals report's
-frontier section ends with, and /status once #1921 lands, never here
-(ADR-0048).
+frontier section ends with, rendered on /status against the bar, never
+here (ADR-0048).
 
 First because 0.1 waits on it, and because the trigger M5 set for decode
 speed, a user's ask, fired with the operator's. The evidence fixes the

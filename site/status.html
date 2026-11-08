@@ -213,6 +213,7 @@
         <h2>Is it any good?</h2>
         <div class="card" id="ratio-card" data-loading>Loading…</div>
         <div class="card" id="frontier-card" data-loading>Loading…</div>
+        <div class="card" id="speed-card" data-loading>Loading…</div>
         <div class="card" id="benchmarks-card" data-loading>Loading…</div>
       </section>
 
@@ -436,6 +437,54 @@
       } else {
         frontier.textContent =
           'The frontier sections of docs/benchmarks/ could not be read at generation time.';
+      }
+
+      // Release 0.1 waits on this bar (ADR-0084, #1921). The bar's value is
+      // status-data.py's SPEED_BAR, read here from the data, never typed, so
+      // moving it is one number. Met or not is said in words, not color.
+      const speed = document.getElementById('speed-card');
+      speed.removeAttribute('data-loading');
+      const bar = data.speed_share?.bar;
+      if (typeof bar === 'number' && data.speed_share.corpora?.length) {
+        const share = (value) => value == null
+          ? 'not measured'
+          : `${value.toFixed(3)}, ${value >= bar ? 'meets the bar' : 'below the bar'}`;
+        // A row whose report names another reference says so in its cells;
+        // status-data.py already refuses a report naming two.
+        const reference = data.speed_share.corpora[0].reference;
+        const against = (c) => c.reference === reference
+          ? '' : ` (of ${escapeHtml(c.reference)}'s)`;
+        const rows = data.speed_share.corpora.map((c) => `
+          <tr>
+            <td>${escapeHtml(c.corpus)}</td>
+            <td>${share(c.encode)}${against(c)}</td>
+            <td>${share(c.decode)}${against(c)}</td>
+            <td>${escapeHtml(c.moved)}</td>
+          </tr>
+        `).join('');
+        speed.innerHTML = `
+          <table class="bench">
+            <caption>
+              Release 0.1 waits on the default level's speed: its encode and
+              decode MB/s each at least ${bar} of ${escapeHtml(reference)}'s
+              in the same run, on both corpora, while it still compresses
+              below zstd -19 (ADR-0084). Each share is the default level's
+              rate over ${escapeHtml(reference)}'s, from the last lines of the
+              frontier section of the generated reports in
+              <code>docs/benchmarks/</code>.
+            </caption>
+            <thead><tr>
+              <th scope="col">corpus</th>
+              <th scope="col">encode share</th>
+              <th scope="col">decode share</th>
+              <th scope="col">shares last moved</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        `;
+      } else {
+        speed.textContent =
+          'The speed share lines of docs/benchmarks/ could not be read at generation time.';
       }
 
       const benchmarks = document.getElementById('benchmarks-card');
