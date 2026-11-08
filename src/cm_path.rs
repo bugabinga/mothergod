@@ -64,7 +64,7 @@ use std::thread;
 use crate::codec::{self, Extent, MAX_DECODED_LEN, SELECTOR_LEN};
 use crate::coder::{Decoder, Encoder};
 use crate::filters::{self, select::Candidate};
-use crate::literal::{Context, Literal, SurpriseLogisticMix};
+use crate::literal::{Context, Literal, SurpriseLogisticMix, logistic_gradient_step};
 use crate::sse::LogitSse;
 use crate::{Error, fan_out, logistic, try_filled_vec};
 
@@ -992,10 +992,7 @@ impl CmPath {
             let bit = code_bit(mid, calibration.refine(rows, p));
             calibration.update(rows, p, bit);
 
-            let error = f64::from(u8::from(bit)) - p;
-            for (w, x) in w.iter_mut().zip(&inputs) {
-                *w += MIXER_RATE * error * x;
-            }
+            logistic_gradient_step(w, &inputs, MIXER_RATE, bit, p);
             if let Some(s) = confidence_slot {
                 match_model.confidence.update(s, bit);
             }

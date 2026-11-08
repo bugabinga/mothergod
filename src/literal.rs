@@ -397,14 +397,16 @@ fn clamp_logistic_probability(p: f64) -> f64 {
 /// experts' mean stretch.
 const LOGISTIC_INITIAL_WEIGHT: f64 = 1.0 / 6.0;
 
-/// One gradient step of [`SurpriseLogisticMix`]'s weight vector for a single
+/// One gradient step of a logistic mixer's weight vector for a single
 /// bit-tree node: the node's error, target bit minus the pre-refine mix
-/// `p`, nudges each expert's weight by `rate` scaled by that expert's own
-/// stretched input. Split out of [`Literal::walk_logit_sse`] so this
-/// arithmetic is checkable against the walk's chained state.
-fn logistic_gradient_step(
-    weights: &mut [f64; EXPERTS],
-    stretched: &[f64; EXPERTS],
+/// `p`, nudges each weight by `rate` scaled by that weight's own stretched
+/// input. [`Literal::walk_logit_sse`] and [`crate::cm_path::CmPath::walk`]
+/// each step their own mixer through it, so the two learn by one rule;
+/// split out so the arithmetic is checkable against directly-chosen values,
+/// independent of the walk's chained state.
+pub(crate) fn logistic_gradient_step<const N: usize>(
+    weights: &mut [f64; N],
+    stretched: &[f64; N],
     rate: f64,
     bit: bool,
     p: f64,
