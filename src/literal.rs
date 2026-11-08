@@ -417,27 +417,37 @@ pub(crate) fn logistic_gradient_step<const N: usize>(
     }
 }
 
-/// One bit-tree node's six-expert logit-domain mix: `prefix`'s per-expert
-/// prefix sums at `(lo, mid, hi)` give each expert's upper-half
-/// probability, [`stretch`]ed and weighted-summed against `weights`.
-/// [`Literal::walk_logit_sse`]'s first step at each node, before its rate
-/// schedule. Split out so it is checkable against directly-chosen prefix
-/// sums, independent of the walk's chained state.
+/// Each expert's mass over a bit-tree node's upper half, the sum of
+/// `row[mid..hi]` over the expert's bank row. A part of one bank's row sums
+/// to at most that bank's `u32` total, so the sum never overflows. A
+/// function of its own so `decode_profile` attributes its time apart from
+/// the walk's (`research/JOURNAL.md` S2-A154): a loop, because
+/// `array::map` compiles to an out-of-line `try_map` that buries this
+/// name in generic arguments the profile cannot attribute.
+fn upper_half_masses(rows: [&[u32]; EXPERTS], mid: usize, hi: usize) -> [u32; EXPERTS] {
+    let mut upper = [0u32; EXPERTS];
+    for (mass, row) in upper.iter_mut().zip(rows) {
+        *mass = row[mid..hi].iter().sum();
+    }
+    upper
+}
+
+/// One bit-tree node's six-expert logit-domain mix: each expert's mass in
+/// the node's upper half over its mass in the whole node, `upper[e] /
+/// range[e]`, is its upper-half probability, [`stretch`]ed and
+/// weighted-summed against `weights`. [`Literal::walk_logit_sse`]'s first
+/// step at each node, before its rate schedule. Split out so it is
+/// checkable against directly-chosen masses, independent of the walk's
+/// chained state.
 fn logistic_mix_node(
-    prefix: &[[u64; ALPHABET + 1]; EXPERTS],
+    upper: &[u32; EXPERTS],
+    range: &[u32; EXPERTS],
     weights: &[f64; EXPERTS],
-    lo: usize,
-    mid: usize,
-    hi: usize,
 ) -> ([f64; EXPERTS], f64) {
     let mut stretched = [0f64; EXPERTS];
     let mut dot = 0.0f64;
-    for (expert, sums) in prefix.iter().enumerate() {
-        #[allow(
-            clippy::cast_precision_loss,
-            reason = "bank totals are bounded by the rescale limit, far below 2^53"
-        )]
-        let p = (sums[hi] - sums[mid]) as f64 / (sums[hi] - sums[lo]) as f64;
+    for expert in 0..EXPERTS {
+        let p = f64::from(upper[expert]) / f64::from(range[expert]);
         stretched[expert] = stretch(clamp_logistic_probability(p));
         dot += weights[expert] * stretched[expert];
     }
@@ -902,24 +912,6 @@ impl Literal {
         })
     }
 
-    /// Each expert's cumulative frequency table over its selected bank:
-    /// `prefix[expert][s]` is the bank's mass below symbol `s`, so any
-    /// `[lo, hi)` range's mass is one subtraction.
-    fn expert_prefix_sums(
-        &self,
-        bank_indices: &[usize; EXPERTS],
-    ) -> [[u64; ALPHABET + 1]; EXPERTS] {
-        let mut prefix = [[0u64; ALPHABET + 1]; EXPERTS];
-        for (sums, &bank) in prefix.iter_mut().zip(bank_indices) {
-            let mut acc = 0u64;
-            for (symbol, &freq) in self.freq[bank_row(bank)].iter().enumerate() {
-                acc += u64::from(freq);
-                sums[symbol + 1] = acc;
-            }
-        }
-        prefix
-    }
-
     /// Codes `byte` through `encoder` under `context`, mixed by `mixer`'s
     /// logit-domain walk and refined through [`LogitSse`]
     /// (`research/JOURNAL.md` S2-A106, S2-A108). The six expert banks
@@ -972,6 +964,17 @@ impl Literal {
     /// before [`clamp_logistic_probability`] even runs: every bank
     /// frequency is at least 1 ([`crate::rescale_bank`] rounds up), and
     /// every node's range holds at least one symbol on each side.
+    ///
+    /// Each expert's mass over the node's range is carried down the walk
+    /// rather than summed: the root's is the bank's `total`, equal to its
+    /// row's sum by [`Self::total`]'s invariant, and a child's is the
+    /// parent's upper-half sum or the parent's mass minus it. So a node sums
+    /// only `freq[mid..hi]`, 255 entries per expert per byte across the
+    /// eight nodes in sums the compiler may vectorize, where a full prefix
+    /// table cost 256 serial additions plus their stores
+    /// (`research/JOURNAL.md` S2-R43, issue #1928). Every mass
+    /// is an exact integer at most the bank's `u32` total, so both `u32`
+    /// sums are exact and the probabilities are bit-identical to the table's.
     pub fn walk_logit_sse(
         &mut self,
         context: Context,
@@ -979,10 +982,17 @@ impl Literal {
         mut code_bit: impl FnMut(usize, f64) -> bool,
     ) -> u8 {
         let (bank_indices, weight_index) = banks(context);
-        let prefix = self.expert_prefix_sums(&bank_indices);
-        let byte = bittree::walk_nodes(|depth, node_prefix, lo, mid, hi| {
-            let (stretched, dot) =
-                logistic_mix_node(&prefix, &mixer.weights[weight_index], lo, mid, hi);
+        let rows: [&[u32]; EXPERTS] = bank_indices.map(|bank| &self.freq[bank_row(bank)]);
+        let mut range: [u32; EXPERTS] = bank_indices.map(|bank| self.total[bank]);
+        debug_assert!(
+            rows.iter()
+                .zip(&range)
+                .all(|(row, &total)| row.iter().sum::<u32>() == total),
+            "every bank's total is its row's sum"
+        );
+        let byte = bittree::walk_nodes(|depth, node_prefix, _lo, mid, hi| {
+            let upper = upper_half_masses(rows, mid, hi);
+            let (stretched, dot) = logistic_mix_node(&upper, &range, &mixer.weights[weight_index]);
             let p = clamp_logistic_probability(squash(dot));
             let node_context = bittree::sse_context(depth, node_prefix);
             let bit = mixer
@@ -1000,6 +1010,9 @@ impl Literal {
                 bit,
                 p,
             );
+            for (mass, &upper) in range.iter_mut().zip(&upper) {
+                *mass = if bit { upper } else { *mass - upper };
+            }
             bit
         });
         self.update(&bank_indices, weight_index, usize::from(byte), exp);

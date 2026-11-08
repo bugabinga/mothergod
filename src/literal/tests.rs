@@ -360,27 +360,22 @@ fn logistic_gradient_step_matches_hand_computed_error_and_delta() {
 }
 
 /// `#810`: pins [`logistic_mix_node`]'s per-expert probability and dot
-/// product against directly-chosen prefix sums, independent of the
-/// bit-tree walk, so a mutated `-`, `/`, or `+=` there lands on a wrong
-/// number instead of surviving under the walk's chained state.
+/// product against directly-chosen masses, independent of the bit-tree
+/// walk, so a mutated `/` or `+=` there lands on a wrong number instead of
+/// surviving under the walk's chained state.
 #[test]
 fn logistic_mix_node_matches_hand_computed_stretch_and_dot() {
-    let (lo, mid, hi) = (0, 128, 256);
-    // Six distinct upper-half probabilities, one per expert, chosen so
-    // `sums[hi] - sums[mid]` and `sums[hi] - sums[lo]` are never equal
-    // (ruling out a `-`/`/` mixup that happens to agree at p = 0.5).
+    // Six distinct upper-half probabilities, one per expert, each over a
+    // range of 256 so `upper` and `range` are never equal (ruling out a
+    // swapped division that happens to agree at p = 0.5).
     let p = [0.75, 0.25, 0.5, 0.875, 0.125, 0.625];
-    let mut prefix = [[0u64; ALPHABET + 1]; EXPERTS];
-    for (sums, &p) in prefix.iter_mut().zip(&p) {
-        sums[hi] = 256;
-        #[allow(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "256 * (1 - p) is in [0, 256] for p in [0, 1]"
-        )]
-        let mid_sum = (256.0 * (1.0 - p)) as u64;
-        sums[mid] = mid_sum;
-    }
+    let range = [256u32; EXPERTS];
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "256 * p is in [0, 256] for p in [0, 1]"
+    )]
+    let upper: [u32; EXPERTS] = p.map(|p| (256.0 * p) as u32);
     let weights = [0.1, -0.2, 0.3, 0.05, 0.4, -0.15];
 
     let expected_stretched: [f64; EXPERTS] =
@@ -391,7 +386,7 @@ fn logistic_mix_node_matches_hand_computed_stretch_and_dot() {
         .map(|(w, s)| w * s)
         .sum();
 
-    let (stretched, dot) = logistic_mix_node(&prefix, &weights, lo, mid, hi);
+    let (stretched, dot) = logistic_mix_node(&upper, &range, &weights);
     for (got, want) in stretched.iter().zip(&expected_stretched) {
         assert!((got - want).abs() < 1e-12, "{stretched:?}");
     }

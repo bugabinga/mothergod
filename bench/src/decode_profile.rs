@@ -10,7 +10,7 @@
 //! A sample is attributed by its leaf's inline chain, the frames `perf`
 //! expands at the sampled instruction, innermost first: the first frame a
 //! [`RULES`] entry matches decides the stage. Inlining is why the chain and
-//! not the symbol: `expert_prefix_sums` and the walk both compile into
+//! not the symbol: `upper_half_masses` and the walk both compile into
 //! `decode_logit_sse`, and `ln` runs inside both `logistic_mix_node` and
 //! `locate`, so the symbol alone cannot tell them apart. Callers beyond the
 //! leaf are not read: a release build omits frame pointers, so `-g`'s chain
@@ -27,8 +27,8 @@ pub enum Stage {
     SseLocate,
     /// The literal model's six-expert logistic mix per node.
     Mix,
-    /// The per-byte cumulative tables over each expert's bank.
-    PrefixSums,
+    /// Each expert's bank mass over a bit-tree node's upper half.
+    UpperMasses,
     /// The bit-tree walk: squash, SSE refine and update, gradients.
     Walk,
     /// The range decoder's literal bit.
@@ -56,7 +56,7 @@ impl Stage {
     pub const ALL: [Stage; 13] = [
         Stage::SseLocate,
         Stage::Mix,
-        Stage::PrefixSums,
+        Stage::UpperMasses,
         Stage::Walk,
         Stage::BitDecode,
         Stage::LiteralRest,
@@ -75,7 +75,7 @@ impl Stage {
         match self {
             Stage::SseLocate
             | Stage::Mix
-            | Stage::PrefixSums
+            | Stage::UpperMasses
             | Stage::Walk
             | Stage::BitDecode
             | Stage::LiteralRest => "literal",
@@ -118,7 +118,7 @@ impl Stage {
 pub const RULES: &[(&[&str], Stage)] = &[
     (&["locate"], Stage::SseLocate),
     (&["logistic_mix_node"], Stage::Mix),
-    (&["expert_prefix_sums"], Stage::PrefixSums),
+    (&["upper_half_masses"], Stage::UpperMasses),
     (&["walk_nodes"], Stage::Walk),
     (&["walk_logit_sse"], Stage::Walk),
     (&["decode_bit"], Stage::BitDecode),
@@ -375,7 +375,7 @@ mod tests {
     /// The second's leaf is in the kernel under a libc caller; the third's
     /// chain resolves through `ln` and `stretch` to `locate`.
     const SCRIPT: &str = "   1001001 \n\
-\t    5a2aff2aa5e9 expert_prefix_sums (inlined)\n\
+\t    5a2aff2aa5e9 upper_half_masses (inlined)\n\
 \t    5a2aff2aa5e9 walk_logit_sse<mothergod::literal::{impl#5}::decode_logit_sse::{closure_env#0}> (inlined)\n\
 \t    5a2aff2aa5e9 <mothergod::literal::Literal>::decode_logit_sse (mothergod)\n\
 \t    74bc05946010 [unknown] ([unknown])\n\
@@ -466,7 +466,7 @@ mod tests {
         let mut tally = Tally::default();
         tally.add(SCRIPT).expect("well-formed");
         assert_eq!(tally.samples, 5);
-        assert_eq!(period(&tally, Stage::PrefixSums), 1_001_001);
+        assert_eq!(period(&tally, Stage::UpperMasses), 1_001_001);
         assert_eq!(period(&tally, Stage::Kernel), 2_000_000);
         assert_eq!(period(&tally, Stage::SseLocate), 1_001_001);
         assert_eq!(period(&tally, Stage::Libc), 1_001_001);
@@ -510,7 +510,7 @@ mod tests {
         let rows: Vec<&str> = table.lines().collect();
         assert_eq!(rows.len(), 2 + Stage::ALL.len() + 1, "{table}");
         assert_eq!(rows[2], "| literal: `locate` | 16.7% | 0.00 |", "{table}");
-        assert_eq!(rows[4], "| literal: `expert_prefix_sums` | 16.7% | 0.00 |");
+        assert_eq!(rows[4], "| literal: `upper_half_masses` | 16.7% | 0.00 |");
         assert_eq!(rows[13], "| kernel | 33.3% | 0.00 |");
         assert_eq!(rows[15], "| total | 100.0% | 0.01 |");
         // A tally of nothing prints zeros, not a division by zero.

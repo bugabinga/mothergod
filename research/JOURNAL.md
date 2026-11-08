@@ -10547,3 +10547,38 @@ record.
   hostile `-3` cap reading the changelog cites; any CPU but this one.
   #1928's second row, the per-byte prefix table, is its own slice.
   `research/progress.jsonl` it307.
+- S2-A157 | ACCEPTED | Issue #1928's second row, the per-byte prefix
+  table of S2-R43's bit-identical cuts: the literal walk sums each node's
+  upper half and carries each expert's range mass down the tree.
+  Hypothesis: `expert_prefix_sums` zeroed and filled a 6 x 257 `u64` table
+  per literal byte, 1,536 serial additions where the eight nodes read three
+  entries per expert, so summing `freq[mid..hi]` per node, 255 entries per
+  expert per byte in sums the compiler may vectorize, lowers the default
+  level's decode cost on the gate cases by a share near S2-A154's prefix
+  row. | Mechanism: `upper_half_masses` sums each expert's bank row over
+  `[mid, hi)` in `u32`; the root's range mass is the bank's `total`, its
+  row's sum by `Literal::total`'s invariant, and a child's is the parent's
+  upper sum or the parent's mass minus it. Each mass is an exact integer at
+  most the bank's `u32` total, so `logistic_mix_node` divides the same two
+  integers the table gave it. `decode_profile`'s prefix row names the
+  helper; written with `array::map` it compiled to an out-of-line
+  `try_map` whose samples landed in `rest`, so it is a loop. Bit-identity:
+  `tests/golden.rs` unchanged and passing. | Measured, main at
+  `74ce960`, version 22, release build, AMD EPYC 9V74 runner.
+  `baseline_gate -- speed`, three alternating pairs, main then branch:
+  106.96/94.99, 107.90/95.41, 104.16/92.60 calibration steps per byte,
+  11.1% to 11.6% per pair, 11.3% on the pooled means; its fp kernel line
+  64.88/57.56, 65.22/57.79, 65.65/57.64. `decode_profile` on Silesia
+  `xml` and `dickens` at the `bench/corpus.toml` pins, 15,537,726 bytes,
+  CPU 3, one run each: main 2.66 CPU s, `expert_prefix_sums` 13.2% (0.35 s),
+  libc 7.3% (0.19 s); branch 2.31 s, `upper_half_masses` 5.4% (0.12 s),
+  libc 0.3% (0.01 s), 13.2% less in total. The libc row's fall is the
+  table's zeroing, a `memset` call on this target (inferred from the row
+  alone, not isolated). | Verdict: **accepted** (`kind: "patch"`, null
+  deltas, bytes unchanged).
+  | **Not measured:** the other ten Silesia files; any CPU but this one; encode, which runs the same walk; the
+  column expert's `mix7` path, which builds its own table. Read in the same
+  profile, not this slice's: since S2-A156 the SSE row reads near zero,
+  `Logit::position` out of line in `rest` and `interpolate` and `learn`
+  inlined under the walk's rule. #1928's third row, the out-of-line
+  `round` and `fma`, is its own slice. `research/progress.jsonl` it308.
