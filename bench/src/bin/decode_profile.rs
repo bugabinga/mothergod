@@ -137,11 +137,14 @@ fn profile(
 }
 
 fn main() -> ExitCode {
-    let inputs: Vec<PathBuf> = std::env::args().skip(1).map(PathBuf::from).collect();
-    if inputs.is_empty() || inputs.iter().any(|path| path.starts_with("-")) {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // The flag guard reads the strings: `Path::starts_with` compares whole
+    // components, so on a `PathBuf` only a bare `-` matched (#1935).
+    if args.is_empty() || args.iter().any(|arg| arg.starts_with('-')) {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     }
+    let inputs: Vec<PathBuf> = args.into_iter().map(PathBuf::from).collect();
     match report(&inputs) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
