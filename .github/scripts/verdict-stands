@@ -26,14 +26,26 @@ This script computes the same id from the event's base and head, reads the
 PR's newest reviewer comment, and prints two GITHUB_OUTPUT lines:
 
     diff_id=<64 hex chars, or empty when the diff could not be read>
+    base_id=<the same id with the base sha folded in, the one a fail typed
+            `post-verdict --waits-on-merge` carries (#1918); empty with diff_id>
     stands=<true when the newest reviewer comment's stamp covers this run,
             by one of the two routes below>
 
-Two routes stand, and `stands=true` skips the model on either:
+Three routes stand, and `stands=true` skips the model on any:
 
     a fail    stamped with diff_id, under `changes-requested`: the author
               has changed nothing the reviewer reads, so a second run would
               post the same items and cost a review.
+    a fail    stamped with base_id, under `changes-requested`: the reviewer
+              typed it `--waits-on-merge`, its every [must] another PR
+              landing, and the diff, title, body and base are unchanged, so
+              the wait is not over. #1907 sat a day under a fail whose one
+              [must] was "wait for #1906": #1906 landed, the branch was
+              refreshed, and the diff-only stamp still matched (#1918). The
+              refresh after that merge moves the base, the id stops
+              matching, and the round the author asked for runs; a plain
+              fail's merge-main refresh (#1050) stands as before, because
+              its id carries no base.
     a pass    on an `edited` event, under `agent-approved`, stamped with
               the id of this same diff under the title and body as they
               were BEFORE the edit, or as they are NOW: either way the
@@ -100,10 +112,16 @@ REVIEWER_FOOTER = "_reviewer ·"
 STAMP = re.compile(r"<!--\s*verdict\s+(pass|fail)\s+([0-9a-f]{64})\s*-->")
 
 
-def digest(diff, title, body):
-    """The id a verdict covers: the diff, the title and the body, in that order."""
-    material = "\n".join(["--diff", diff, "--title", title, "--body", body])
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+def digest(diff, title, body, base=""):
+    """The id a verdict covers: the diff, the title and the body, in that order.
+
+    `base` is the base sha, folded in only for the id a `--waits-on-merge`
+    fail stamps (#1918), so that fail alone stops matching when main moves.
+    """
+    material = ["--diff", diff, "--title", title, "--body", body]
+    if base:
+        material += ["--base", base]
+    return hashlib.sha256("\n".join(material).encode("utf-8")).hexdigest()
 
 
 def footer(text):
@@ -147,12 +165,13 @@ def changes_of(raw):
     return changes if isinstance(changes, dict) else {}
 
 
-def decide(labels, comments, diff_id, before_id=""):
+def decide(labels, comments, diff_id, before_id="", base_id=""):
     """Pure. (stands, why): does the newest reviewer comment's stamp cover this run?
 
     `diff_id` is the id of the diff with the current title and body;
     `before_id` the id of the same diff with the title and body before this
-    `edited` event, empty when the event edited neither.
+    `edited` event, empty when the event edited neither; `base_id` the id
+    of the same diff, title and body with the current base folded in.
     """
     if not diff_id:
         return False, "no diff id, so no stamp can match; reviewing"
@@ -169,9 +188,13 @@ def decide(labels, comments, diff_id, before_id=""):
     if verdict == "fail":
         if "changes-requested" not in labels:
             return False, "a fail stamp without changes-requested, so no verdict is standing; reviewing"
-        if stamped != diff_id:
-            return False, f"the standing fail covers {stamped[:12]}, this diff is {diff_id[:12]}; reviewing"
-        return True, f"the standing fail covers {diff_id[:12]}: the diff, title and body are unchanged"
+        if stamped == diff_id:
+            return True, f"the standing fail covers {diff_id[:12]}: the diff, title and body are unchanged"
+        if base_id and stamped == base_id:
+            return True, (f"the standing fail covers {base_id[:12]}: it waits on a merge, and the diff, "
+                          "title, body and base are unchanged")
+        return False, (f"the standing fail covers {stamped[:12]}, this diff is {diff_id[:12]} "
+                       f"({base_id[:12] or 'no id'} with its base); reviewing")
     if not before_id:
         return False, "the newest reviewer comment is a pass stamp and no title or body was edited; reviewing"
     if "agent-approved" not in labels:
@@ -206,7 +229,7 @@ def main(argv):
         print('usage: verdict-stands <pr> <base-sha> <head-sha> >> "$GITHUB_OUTPUT"', file=sys.stderr)
         return 2
     _, number, base, head = argv
-    diff_id = before_id = ""
+    diff_id = before_id = base_id = ""
     labels, comments = [], []
     raw = run(["gh", "pr", "view", number, "--json", "title,body,labels,comments"])
     if raw is not None:
@@ -218,14 +241,16 @@ def main(argv):
             if diff is not None:
                 title, body = pr.get("title") or "", pr.get("body") or ""
                 diff_id = digest(diff, title, body)
+                base_id = digest(diff, title, body, base)
                 previous = before_edit(changes_of(os.environ.get("CHANGES")), title, body)
                 if previous is not None:
                     before_id = digest(diff, *previous)
         except (AttributeError, KeyError, TypeError, ValueError) as err:
             print(f"verdict-stands: PR #{number} did not read: {err}", file=sys.stderr)
-    stands, why = decide(labels, comments, diff_id, before_id)
+    stands, why = decide(labels, comments, diff_id, before_id, base_id)
     print(f"verdict-stands: {why}", file=sys.stderr)
     print(f"diff_id={diff_id}")
+    print(f"base_id={base_id}")
     print(f"stands={'true' if stands else 'false'}")
     return 0
 

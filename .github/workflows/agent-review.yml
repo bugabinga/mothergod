@@ -154,7 +154,9 @@ jobs:
 
       # Is there anything new to judge? verdict-stands prints the id of
       # the diff, title and body (DIFF_ID below, which post-verdict stamps
-      # into the verdict) and `stands=true` when the newest reviewer
+      # into the verdict), the same with the base folded in (BASE_ID, the
+      # stamp of a fail typed `--waits-on-merge`, #1918) and `stands=true`
+      # when the newest reviewer
       # comment's stamp already covers this run. The routes that stand
       # live in the script's docstring, the one list (#1246; #1537 is
       # what a copy of it here drifted into). CHANGES is the event's
@@ -215,6 +217,7 @@ jobs:
           # What post-verdict stamps into the verdict comment (the stamp
           # step's id of the diff, title and body this session was handed).
           DIFF_ID: ${{ steps.stamp.outputs.diff_id }}
+          BASE_ID: ${{ steps.stamp.outputs.base_id }}
           # Admits tg-draft to the webhook worker's own surface, so the
           # operator's phone shows what this run is doing (#742). Not a
           # Telegram credential.
@@ -311,12 +314,9 @@ jobs:
               Attempt it; an unsigned branch commit is no reason to stop
               (GOVERNANCE.md "Merging"). Exit 2 means required gates are
               still pending and the merge is armed on your head: stop. Any
-              other failure: say so on the thread; the BDFL sweep rescues
-              an approved PR.
+              other failure: say so on the thread.
               A PASS is a merge: the sweep rescues every `agent-approved`
-              PR and reads no prose (#1852 landed past its verdict's hold).
-              Right code waiting on something outside the diff is FAIL,
-              one [must] naming the wait.
+              PR and reads no prose.
               One carve-out: a diff touching `.github/workflows/` is the BDFL's
               to merge (GOVERNANCE.md "Merging"). Post the verdict and the
               label, say the merge is the BDFL's, and stop.
@@ -324,13 +324,16 @@ jobs:
               not cause, is work this run defers: before the merge, file it
               or drop it, because nobody reads a merged PR's thread.
               `.github/scripts/gh-comment --new "<symptom>" --label
-              <realm>`, plus `--label bug` for a defect: the heartbeat
-              ranks bug first and a realm label alone sinks it under every
-              roadmap item.
+              <realm>`, plus `--label bug` for a defect, else the heartbeat
+              ranks it under every roadmap item.
             - FAIL: `.github/scripts/post-verdict $PR_NUMBER fail`, body on
               stdin, each item tagged [must] or [nit], specific and
               actionable. Courteous and explanatory, especially to human
               authors. The label carries the verdict.
+              Right code waiting on another PR's merge: `fail
+              --waits-on-merge`, one [must] naming the wait; that fail
+              stands until the base moves, a plain one until the diff,
+              title or body does.
 
             Never pass a PR you doubt on losslessness or decoder safety: doubt
             means FAIL with questions.
