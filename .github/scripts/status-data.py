@@ -23,6 +23,9 @@ else:
 - frontier               docs/benchmarks/*.md frontier sections (mothergod's two
                          neighbours among every gzip, zstd and xz level, and
                          when the pair last moved)
+- speed_share            the same sections' share lines (the default level's
+                         rates over xz -9e's, and when they last moved) beside
+                         SPEED_BAR, release 0.1's bar (ADR-0084)
 - experiments            research/progress.jsonl
 - merged_commits_7d      git history (deploy checks out full depth)
 - sloc_code_src, sloc_test_src, test_functions_src  the src/ tree
@@ -208,6 +211,30 @@ def cells(line):
 REPORTS = (("Canterbury", "canterbury.md"), ("Silesia", "silesia.md"))
 
 
+def frontier_section(filename):
+    """The text after a finals report's `## Frontier:` heading."""
+    text = (ROOT / "docs" / "benchmarks" / filename).read_text(encoding="utf-8")
+    _, found, section = text.partition("\n## Frontier:")
+    if not found:
+        raise ValueError(f"no frontier section in {filename}")
+    return section
+
+
+def last_moved(source, line_start):
+    """Commit date of the newest change to a line of `source` that
+    `line_start` (an extended regex) matches from its first character, so a
+    regeneration that rewrites the report around the line does not move it."""
+    moved = subprocess.run(
+        ["git", "-C", str(ROOT), "log", "-1", "--format=%cs", f"-G^{line_start}", "--", source],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    if not moved:
+        raise ValueError(f"no commit touches a '{line_start}' line of {source}")
+    return moved
+
+
 @field("benchmarks")
 def _benchmarks():
     baseline = json.loads((ROOT / "bench" / "baseline.json").read_text())
@@ -294,10 +321,7 @@ def _frontier():
     corpora = []
     for corpus, filename in REPORTS:
         source = f"docs/benchmarks/{filename}"
-        text = (ROOT / source).read_text(encoding="utf-8")
-        _, found, section = text.partition("\n## Frontier:")
-        if not found:
-            raise ValueError(f"no frontier section in {filename}")
+        section = frontier_section(filename)
         rows = {}
         for line in section.splitlines():
             if line.startswith("|"):
@@ -316,18 +340,6 @@ def _frontier():
             level = named.group(1).strip()
             return None if level == "none" else {"level": level, **rows[level]}
 
-        moved = subprocess.run(
-            [
-                "git", "-C", str(ROOT), "log", "-1", "--format=%cs",
-                "-G^(fastest level at least as good|best level at least as fast):",
-                "--", source,
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-        if not moved:
-            raise ValueError(f"no commit touches {filename}'s neighbour lines")
         corpora.append(
             {
                 "corpus": corpus,
@@ -335,10 +347,59 @@ def _frontier():
                 "mothergod": rows["mothergod"],
                 "as_good": neighbour("fastest level at least as good"),
                 "as_fast": neighbour("best level at least as fast"),
-                "moved": moved,
+                "moved": last_moved(
+                    source, "(fastest level at least as good|best level at least as fast):"
+                ),
             }
         )
     return {"corpora": corpora}
+
+
+# Release 0.1's speed bar (ADR-0084): the default level's encode and decode
+# MB/s, each over xz -9e's in the same report pass, may not fall below this
+# share. The operator's number; this constant is the one copy any renderer
+# reads, so moving the bar is this line and the ADR that decides it.
+SPEED_BAR = 0.5
+
+SHARE_LINE = re.compile(r"^(encode|decode) rate as a share of (.+)'s: (.+)$", re.MULTILINE)
+
+
+@field("speed_share")
+def _speed_share():
+    """The default level's rates as a share of the field's reference (#1921).
+
+    Each finals report's frontier section ends with two lines, `encode rate
+    as a share of xz -9e's: 0.078` and its decode twin, `none` where the
+    report has no share to print. The reference's name is read from the
+    line, never assumed, so a report that changes it carries through. `bar`
+    is SPEED_BAR; whether a share meets it is the renderer's comparison.
+    `moved` is the commit date of the newest change to either share line.
+    """
+    corpora = []
+    for corpus, filename in REPORTS:
+        source = f"docs/benchmarks/{filename}"
+        lines = {
+            axis: (reference, share)
+            for axis, reference, share in SHARE_LINE.findall(frontier_section(filename))
+        }
+        if set(lines) != {"encode", "decode"}:
+            raise ValueError(f"{filename} lacks an encode or decode share line")
+        references = {reference for reference, _ in lines.values()}
+        if len(references) != 1:
+            raise ValueError(f"{filename}'s share lines name two references: {sorted(references)}")
+        corpora.append(
+            {
+                "corpus": corpus,
+                "source": source,
+                "reference": references.pop(),
+                **{
+                    axis: None if share.strip() == "none" else float(share)
+                    for axis, (_, share) in lines.items()
+                },
+                "moved": last_moved(source, "(encode|decode) rate as a share of .+'s:"),
+            }
+        )
+    return {"bar": SPEED_BAR, "corpora": corpora}
 
 
 @field("experiments")
