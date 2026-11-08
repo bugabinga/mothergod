@@ -17,12 +17,12 @@ spec = importlib.util.spec_from_loader("traffic_snapshot", loader)
 mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
 call = json.loads(sys.stdin.read())
-print(mod.build(call["prior"], call["views"], call["clones"], "https://example.test/run/1"))
+print(mod.build(call["prior"], call["views"], call["clones"], call["referrers"], call["paths"], "https://example.test/run/1"))
 `;
 
-const run = (prior, views, clones) => {
+const run = (prior, views, clones, referrers = [], paths = []) => {
   const res = spawnSync("python3", ["-c", driver, scriptsDir], {
-    input: JSON.stringify({ prior, views, clones }),
+    input: JSON.stringify({ prior, views, clones, referrers, paths }),
     encoding: "utf-8",
   });
   return { status: res.status, body: res.stdout, err: res.stderr };
@@ -119,4 +119,49 @@ test("body over budget trims oldest days and records the horizon", () => {
   assert.equal(state.trimmed_before, kept[0]);
   // Newest data survives the trim; only the oldest end pays.
   assert.ok(kept[kept.length - 1].startsWith("2023-04"));
+});
+
+// The popular/* endpoints behind #1855: 14-day totals, rendered not merged.
+const none = () => [views([], 0, 0), clones([], 0, 0)];
+
+test("referrer and path tables render the fresh window with the repo prefix stripped", () => {
+  const r = run(
+    "",
+    ...none(),
+    [{ referrer: "aocr.org", count: 189, uniques: 188 }],
+    [
+      { path: "/bugabinga/mothergod", title: "Overview", count: 9, uniques: 5 },
+      { path: "/bugabinga/mothergod/pull/142", title: "/pull/142", count: 5, uniques: 3 },
+    ],
+  );
+  assert.equal(r.status, 0, r.err);
+  assert.match(
+    r.body,
+    /\| referrer \(last 14 days\) \| count \| uniques \|\n\|---\|---\|---\|\n\| `aocr\.org` \| 189 \| 188 \|/,
+  );
+  assert.match(r.body, /\| `\/` \| 9 \| 5 \|\n\| `\/pull\/142` \| 5 \| 3 \|/);
+});
+
+test("empty popular payloads render a none row, not an empty table", () => {
+  const r = run("", ...none());
+  assert.equal(r.status, 0, r.err);
+  assert.equal((r.body.match(/\| none \| 0 \| 0 \|/g) || []).length, 2);
+});
+
+test("a hostile referrer cannot break the table or render as markup", () => {
+  const r = run("", ...none(), [
+    { referrer: "a|b`[x](http://e)\nc" + "z".repeat(200), count: 1, uniques: 1 },
+  ]);
+  assert.equal(r.status, 0, r.err);
+  const row = r.body.split("\n").find((l) => l.includes("[x](http://e)"));
+  assert.ok(row, "the referrer row exists");
+  assert.equal(row.split("|").length, 5, "three cells, no injected column");
+  assert.match(row, /^\| `ab\[x\]\(http:\/\/e\)cz+` \| 1 \| 1 \|$/);
+  assert.ok(row.length < 120, `cell is capped, row is ${row.length} chars`);
+});
+
+test("a popular payload that is not a list of rows fails loudly", () => {
+  const r = run("", ...none(), { message: "Resource not accessible by integration" }, []);
+  assert.equal(r.status, 1);
+  assert.match(r.err, /popular\/referrers payload shape unexpected/);
 });
