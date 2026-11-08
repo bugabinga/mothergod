@@ -22,6 +22,13 @@ diff did not read at guard time, and a verdict withheld for a missing
 stamp would stall the PR where an unstamped one merely costs the next
 refresh a review (verdict-stands fails open toward reviewing).
 
+`fail --waits-on-merge` types a FAIL whose every [must] is another PR
+merging (#1918): it stamps BASE_ID, the same id with the base sha folded
+in, so the fail stands through edits of nothing and stops standing the
+moment a refresh moves the base. A plain fail's id carries no base, so
+#1050's merge-main refreshes under `changes-requested` stay silent. A
+pass waits on nothing, and the flag with it is a usage error.
+
 A fail first pulls any auto-merge a PASS armed (#1467): #1462's round 1
 PASS armed the merge through merge-pr, propagate-review's refresh of the
 same diff drew a round 2 FAIL, and GitHub landed the head 25 seconds after
@@ -43,7 +50,7 @@ retrospect, rounds.py and the self-trigger guard already recognise.
 ROLE must be `reviewer`: the pair is that seat's typed verdict and no
 other seat applies it (#181).
 
-Usage: post-verdict <pr> pass|fail < body
+Usage: post-verdict <pr> pass|fail [--waits-on-merge] < body
 Prints the comment's URL on stdout.
 """
 
@@ -101,9 +108,14 @@ def main():
     parser = argparse.ArgumentParser(prog="post-verdict", description=__doc__.splitlines()[0])
     parser.add_argument("number", help="the PR the verdict is on")
     parser.add_argument("verdict", choices=sorted(LABELS), help="pass or fail")
+    parser.add_argument("--waits-on-merge", action="store_true",
+                        help="a fail whose every [must] is another PR merging: "
+                             "stamp the base in, so a refresh past that merge reviews (#1918)")
     args = parser.parse_args()
     if not args.number.isdigit():
-        die("usage: post-verdict <pr> pass|fail < body")
+        die("usage: post-verdict <pr> pass|fail [--waits-on-merge] < body")
+    if args.waits_on_merge and args.verdict != "fail":
+        die("--waits-on-merge types a fail; a pass waits on nothing")
     if os.environ.get("ROLE", "") != "reviewer":
         die("ROLE is not reviewer; the verdict pair is the reviewer's typed verdict (#181)")
     scope = os.environ.get("PR_NUMBER")
@@ -114,9 +126,10 @@ def main():
     body = stdin_body.read("verdict")
     if not body:
         die("empty body; a verdict with no items is a label with nothing behind it")
-    diff_id = os.environ.get("DIFF_ID", "")
+    id_var = "BASE_ID" if args.waits_on_merge else "DIFF_ID"
+    diff_id = os.environ.get(id_var, "")
     if not diff_id:
-        print("post-verdict: DIFF_ID is empty, posting unstamped; the next refresh "
+        print(f"post-verdict: {id_var} is empty, posting unstamped; the next refresh "
               "re-reviews instead of standing", file=sys.stderr)
 
     if args.verdict == "fail":
