@@ -1,7 +1,9 @@
 # GitHub forgets repo traffic after 14 days; this job is the memory
-# (issue #417). Deliberately NOT an agent: reading two fixed endpoints
+# (issue #417). Deliberately NOT an agent: reading four fixed endpoints
 # and merging by date is arithmetic, a script does it for free, and a
-# fixed-schema merge has no injection surface. So no agent-guard either:
+# fixed-schema merge has no injection surface; the one stranger-written
+# field, a referrer, is rendered as a literal code span (#1855). So no
+# agent-guard either:
 # the pause stops agents acting during an outage, and a Sunday this job
 # skips is a week of data GitHub has already forgotten (issue #526).
 #
@@ -66,8 +68,10 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          for ep in views clones; do
-            code="$(curl -sS --retry 3 -o "$RUNNER_TEMP/$ep.json" -w '%{http_code}' \
+          # popular/referrers and popular/paths are 14-day totals with no
+          # per-day rows (#1855); the script renders them, it cannot merge them.
+          for ep in views clones popular/referrers popular/paths; do
+            code="$(curl -sS --retry 3 -o "$RUNNER_TEMP/${ep##*/}.json" -w '%{http_code}' \
               -H "Authorization: Bearer $GH_ADMIN_TOKEN" \
               -H "Accept: application/vnd.github+json" \
               "https://api.github.com/repos/$GITHUB_REPOSITORY/traffic/$ep" || echo 000)"
@@ -93,6 +97,7 @@ jobs:
 
           python3 .github/scripts/traffic-snapshot.py \
             "$RUNNER_TEMP/views.json" "$RUNNER_TEMP/clones.json" \
+            "$RUNNER_TEMP/referrers.json" "$RUNNER_TEMP/paths.json" \
             "$RUNNER_TEMP/prior.md" "$RUNNER_TEMP/body.md"
           cat "$RUNNER_TEMP/body.md" >> "$GITHUB_STEP_SUMMARY"
 
