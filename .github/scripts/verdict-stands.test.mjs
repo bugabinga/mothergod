@@ -27,9 +27,9 @@ mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
 call = json.loads(sys.argv[2])
 if call["fn"] == "decide":
-    print(json.dumps(mod.decide(call["labels"], call["comments"], call["id"], call.get("before", ""))))
+    print(json.dumps(mod.decide(call["labels"], call["comments"], call["id"], call.get("before", ""), call.get("base", ""))))
 else:
-    print(json.dumps(mod.digest(call["diff"], call["title"], call["body"])))
+    print(json.dumps(mod.digest(call["diff"], call["title"], call["body"], call.get("base", ""))))
 `;
 
 function call(payload) {
@@ -40,9 +40,11 @@ function call(payload) {
   return JSON.parse(res.stdout);
 }
 
-const decide = (labels, comments, id, before = "") => call({ fn: "decide", labels, comments, id, before });
+const decide = (labels, comments, id, before = "", base = "") =>
+  call({ fn: "decide", labels, comments, id, before, base });
 const ID = "a".repeat(64);
 const OTHER = "b".repeat(64);
+const BASE = "d".repeat(64);
 const reviewer = (body, createdAt, stamp) => ({
   createdAt,
   body: `${body}\n\n${
@@ -67,6 +69,30 @@ test("a standing fail on the same id with changes-requested stands", () => {
 test("a different id reviews: the author changed what the reviewer reads", () => {
   const [stands] = decide(["changes-requested"], [reviewer("one [must]", "2026-10-12T00:45:37Z", ["fail", OTHER])], ID);
   assert.equal(stands, false);
+});
+
+test("a fail stamped with the base-typed id stands while the base is unchanged (#1918)", () => {
+  const [stands, why] = decide(
+    ["changes-requested"],
+    [reviewer("one [must]: wait for #1906", "2026-11-07T00:45:37Z", ["fail", BASE])],
+    ID,
+    "",
+    BASE,
+  );
+  assert.equal(stands, true);
+  assert.match(why, /waits on a merge/);
+});
+
+test("a base-typed fail reviews once the base moved: the merge it waited on landed", () => {
+  const [stands, why] = decide(
+    ["changes-requested"],
+    [reviewer("one [must]: wait for #1906", "2026-11-07T00:45:37Z", ["fail", BASE])],
+    ID,
+    "",
+    OTHER,
+  );
+  assert.equal(stands, false);
+  assert.match(why, /with its base/);
 });
 
 test("a fail stamp without changes-requested reviews: no verdict is standing", () => {
@@ -185,6 +211,9 @@ test("digest: the body and title are part of what a verdict covers", () => {
   assert.notEqual(call({ fn: "digest", diff: "d", title: "t", body: "b2" }), base);
   assert.notEqual(call({ fn: "digest", diff: "d", title: "t2", body: "b" }), base);
   assert.equal(call({ fn: "digest", diff: "d", title: "t", body: "b" }), base);
+  const typed = call({ fn: "digest", diff: "d", title: "t", body: "b", base: "0".repeat(40) });
+  assert.notEqual(typed, base);
+  assert.notEqual(call({ fn: "digest", diff: "d", title: "t", body: "b", base: "1".repeat(40) }), typed);
 });
 
 // The script end to end, with a stub gh and a real repository: which pushes
@@ -264,6 +293,29 @@ test("end to end: a merge of main that touches no PR file keeps the id and stand
   assert.equal(second.diff_id, first.diff_id);
   assert.equal(second.stands, "true");
   assert.match(second.stderr, /unchanged/);
+});
+
+test("end to end: a --waits-on-merge fail stands until main moves, then reviews on the refresh (#1907's shape)", () => {
+  const { dir, git, base, head } = prBranch();
+  const first = stands(dir, "1", base, head, failedOn(""));
+  assert.match(first.base_id, /^[0-9a-f]{64}$/);
+  assert.notEqual(first.base_id, first.diff_id);
+  const typed = failedOn(first.base_id);
+  const second = stands(dir, "1", base, head, typed);
+  assert.equal(second.stands, "true");
+  assert.match(second.stderr, /waits on a merge/);
+
+  // The PR it waited on lands on main; the branch is refreshed.
+  git("checkout", "-q", "main");
+  writeFileSync(join(dir, "other.md"), "one\ntwo\n");
+  git("commit", "-qam", "the awaited PR lands");
+  const base2 = git("rev-parse", "HEAD");
+  git("checkout", "-q", "pr");
+  git("merge", "-q", "--no-edit", "main");
+  const third = stands(dir, "1", base2, git("rev-parse", "HEAD"), typed);
+  assert.equal(third.diff_id, first.diff_id);
+  assert.notEqual(third.base_id, first.base_id);
+  assert.equal(third.stands, "false");
 });
 
 test("end to end: an indentation-only fix changes the id, so a whitespace [must] gets its round", () => {

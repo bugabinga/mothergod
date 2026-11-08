@@ -160,9 +160,9 @@ jobs:
           # Bash is the one built-in offered: `--tools` hides, where
           # `--allowedTools` only pre-approves (#725). The curator judges
           # and routes, never modifies the tree (GOVERNANCE.md "Tool
-          # envelopes", the reviewer precedent), and its one run measured
-          # since #946 (37865759900, 33 calls) used Bash alone. Bash
-          # unrestricted, same section.
+          # envelopes", the reviewer precedent), and every measured run
+          # used Bash alone (`sessions sql` over the `tools` table, the
+          # context audit's census). Bash unrestricted, same section.
           claude_args: |
             --append-system-prompt-file agents/personas/curator.md
             ${{ steps.guard.outputs.model_flag }}
