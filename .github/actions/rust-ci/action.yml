@@ -109,6 +109,25 @@ runs:
           echo "$key=$linker" >> "$GITHUB_ENV"
         fi
 
+    # Invariant: this step is declared before `Restore x binary`. rust-cache
+    # cleans every listed target dir twice: on a partial-match restore it
+    # pre-cleans (the #246 clobber of a restored cargo-x), and in its post
+    # step it deletes all of x/target/debug but build, .fingerprint and
+    # deps. Declared first, its restore runs before the x-cache restore and
+    # its post runs after the x-cache save (posts run in reverse), so
+    # neither clean can reach the binary the x-cache holds.
+    - if: ${{ inputs.cache == 'true' && inputs.checks != 'fmt' }}
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      with:
+        key: ${{ steps.resolve.outputs.toolchain }}-${{ inputs.target }}-${{ inputs.checks }}
+        # x's own suite, the second of `cargo x test`'s three, rebuilt
+        # x's dependencies in x/target for two minutes of every test job
+        # (main's test job of 2026-11-07, 2m02s of 5.8 min): the x-cache
+        # below restores the binary alone.
+        workspaces: |
+          . -> target
+          x -> target
+
     - name: Restore x binary
       if: ${{ inputs.checks != 'setup' && inputs.checks != 'runtime' }}
       id: x-cache
@@ -123,18 +142,6 @@ runs:
       if: ${{ inputs.checks != 'setup' && inputs.checks != 'runtime' && steps.x-cache.outputs.cache-hit != 'true' }}
       shell: bash
       run: cargo build --manifest-path x/Cargo.toml
-
-    - if: ${{ inputs.cache == 'true' && inputs.checks != 'fmt' }}
-      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-      with:
-        key: ${{ steps.resolve.outputs.toolchain }}-${{ inputs.target }}-${{ inputs.checks }}
-        # x's own suite, the second of `cargo x test`'s three, rebuilt
-        # x's dependencies in x/target for two minutes of every test job
-        # (main's test job of 2026-11-07, 2m02s of 5.8 min): the x-cache
-        # above restores the binary alone.
-        workspaces: |
-          . -> target
-          x -> target
 
     - name: Run Rust checks
       if: ${{ inputs.checks != 'setup' }}
