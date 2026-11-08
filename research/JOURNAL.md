@@ -10488,3 +10488,28 @@ record.
   on this runner); the per-byte-class split and LLVM's loop-vectorize
   remarks, #1930's other two outputs; a second run or CPU.
   `research/progress.jsonl` it305.
+- S2-A155 | ACCEPTED | Issue #1956: the `-4` changelog bullet's train,
+  sealed and decode figures re-read at version 22. Hypothesis: S2-A142's
+  version 19 figures plus the three model entries since (S2-A150 to
+  S2-A152, #1905, #1909, #1912) predict version 22's: about 0.333 b/B
+  train, about 0.30 sealed, decode about 18x `-3`'s on the gate cases. |
+  Mechanism: S2-A142's and S2-A141's own drivers, unchanged, from a scratch
+  test: `cm_path::extreme_frames_vs_real_bitstream` once, then
+  `cm_path::decode_costs_vs_hybrid` three times. | Measured, main at
+  `6e51dcd`, version 22, release build, AMD EPYC 7763 4 logical cores
+  runner: train mean **-0.332073**, `x86_dense_code` -0.792320,
+  `interleaved_audio16` -0.500480, `sqlite_like_records` -0.422080,
+  `entropy_ladder_h8` 0.000000 (the hybrid's frame kept), every other case
+  between -0.113280 and -0.351200; sealed `access_log` **-0.309600**,
+  `gradient_image` **-0.306400**. Decode, calibration steps per byte,
+  hybrid then path: 119.0 and 2072.0, 119.0 and 2080.3, 116.6 and 2039.7,
+  ratios **17.41**, 17.48, 17.50. | Verdict: **accepted**, a measurement:
+  the train mean lands within 0.001 of the sum of the four recorded
+  deltas, the sealed pair within 0.01, and decode at 17.5x under the
+  18.4x to 18.9x that compounding the three entries' decode rises onto
+  S2-A141's 6.7x to 6.9x predicts; those rises were read on an EPYC 9V45
+  and against different champions, which would explain the gap (inferred,
+  not isolated). | **Not measured:** the
+  4 MiB `git log -p` slice of S2-A142, which the bullet drops for the
+  Silesia report rows; any runner but this one. `research/progress.jsonl`
+  it306.

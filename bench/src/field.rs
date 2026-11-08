@@ -235,9 +235,9 @@ pub fn measure(competitor: &Competitor, data: &[u8]) -> io::Result<FieldPoint> {
 const CHILD_FLAG: &str = "--child";
 
 /// Every encoder level the reports measure, quickest first, one row each
-/// (ROADMAP M5, issue #1340). [`Level::Extreme`] prices at 3x `-3`'s encode
-/// and 28x its decode on issue #1824's 4 MiB text slice, the dearest row of
-/// a report run.
+/// (ROADMAP M5, issue #1340). [`Level::Extreme`] is the dearest row of a
+/// report run by a wide margin; its encode and decode rates against `-3`'s
+/// are the frontier sections of the published reports.
 pub const LEVELS: [Level; 4] = [Level::Fastest, Level::Fast, Level::Best, Level::Extreme];
 
 /// The digit the CLI selects `level` by.
