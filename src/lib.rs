@@ -582,11 +582,18 @@ pub(crate) fn rescale_bank(freq: &mut [u32], total: &mut u32, symbol: usize, rat
     }
 }
 
-/// Builds a `Vec<T>` of `n` copies of `value`, returning `Err` instead of
-/// aborting if the allocator cannot satisfy `n` (hard rule 2, `rust-craft`
-/// skill's allocation-discipline, #453). No `extend_from_within` after
-/// `try_reserve_exact` grows the length past `n`, so none asks the allocator
-/// for more than was reserved.
+/// An empty `Vec<T>` with room for exactly `n`, or `Err` where
+/// `Vec::with_capacity` would abort (hard rule 2, `rust-craft` skill's
+/// allocation-discipline, #453); `Vec::try_with_capacity` is unstable.
+pub(crate) fn try_with_capacity<T>(n: usize) -> Result<Vec<T>, std::collections::TryReserveError> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(n)?;
+    Ok(v)
+}
+
+/// Builds a `Vec<T>` of `n` copies of `value`, `Err` where `vec!` would
+/// abort. No `extend_from_within` after [`try_with_capacity`] grows the
+/// length past `n`, so none asks the allocator for more than was reserved.
 ///
 /// The fill stores at most one 16 KiB chunk element by element, then
 /// memcpys that chunk across the rest, about `n * size_of::<T>() / 16 KiB`
@@ -601,8 +608,7 @@ pub(crate) fn try_filled_vec<T: Copy>(
     value: T,
 ) -> Result<Vec<T>, std::collections::TryReserveError> {
     let chunk = (16 * 1024 / size_of::<T>().max(1)).max(1);
-    let mut v = Vec::new();
-    v.try_reserve_exact(n)?;
+    let mut v = try_with_capacity(n)?;
     v.resize(n.min(chunk), value);
     while v.len() < n {
         v.extend_from_within(..chunk.min(n - v.len()));
@@ -644,8 +650,7 @@ pub(crate) fn fan_out<'scope, T: Send + 'scope>(
 pub(crate) fn try_vec_from_slice(
     data: &[u8],
 ) -> Result<Vec<u8>, std::collections::TryReserveError> {
-    let mut v = Vec::new();
-    v.try_reserve_exact(data.len())?;
+    let mut v = try_with_capacity(data.len())?;
     v.extend_from_slice(data);
     Ok(v)
 }
@@ -911,9 +916,10 @@ impl<'w, W: std::io::Write> TryBufWriter<'w, W> {
     const CAPACITY: usize = 8 * 1024;
 
     fn try_new(inner: &'w mut W) -> Result<Self, std::collections::TryReserveError> {
-        let mut buf = Vec::new();
-        buf.try_reserve_exact(Self::CAPACITY)?;
-        Ok(Self { inner, buf })
+        Ok(Self {
+            inner,
+            buf: try_with_capacity(Self::CAPACITY)?,
+        })
     }
 
     /// Writes out and clears any bytes still buffered, without flushing

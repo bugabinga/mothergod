@@ -66,7 +66,7 @@ use crate::coder::{Decoder, Encoder};
 use crate::filters::{self, select::Candidate};
 use crate::literal::{Context, Literal, SurpriseLogisticMix, logistic_gradient_step};
 use crate::sse::LogitSse;
-use crate::{Error, fan_out, logistic, try_filled_vec};
+use crate::{Error, fan_out, logistic, try_filled_vec, try_with_capacity};
 
 /// The most bytes one [`crate::Method::Cm`] frame, and one [`decode`],
 /// outputs: a ceiling below [`MAX_DECODED_LEN`], because every output byte
@@ -743,8 +743,7 @@ struct Contexts {
 
 impl Contexts {
     fn try_new() -> Result<Self, std::collections::TryReserveError> {
-        let mut tables = Vec::new();
-        tables.try_reserve_exact(CONTEXTS)?;
+        let mut tables = try_with_capacity(CONTEXTS)?;
         for _ in 0..CONTEXTS {
             tables.push(try_filled_vec(1 << ORDER_BUCKET_BITS, Bucket::FRESH)?);
         }
@@ -1059,8 +1058,7 @@ pub fn decode(stream: &[u8], len: u32, max_len: u32) -> Result<Vec<u8>, Error> {
         return Err(Error::Truncated);
     }
     let len = len as usize;
-    let mut output = Vec::new();
-    output.try_reserve_exact(len)?;
+    let mut output = try_with_capacity(len)?;
     let mut model = CmPath::try_new()?;
     let mut decoder = Decoder::new(stream);
     let mut context = Context::default();

@@ -64,7 +64,7 @@ use crate::filters::{
 use crate::literal::{ColumnExpertState, Context, Literal, SurpriseLogisticMix};
 use crate::lz::{self, Reach, RepCache, RepSlot, Token};
 use crate::model::Model;
-use crate::{Error, Level, fan_out, rejoin};
+use crate::{Error, Level, fan_out, rejoin, try_with_capacity};
 
 /// Fixed bank count [`crate::literal::ColumnExpertState`] sizes its storage
 /// from on the real coding path (`encode_tokens`'s [`EncodeSink`], `decode`):
@@ -550,8 +550,7 @@ impl ResidualTree {
     /// A fresh tree, or `Err` if the allocator refuses (hard rule 2).
     fn try_new(buckets: usize) -> Result<Self, std::collections::TryReserveError> {
         let count = buckets << RESIDUAL_MODELED_BITS;
-        let mut nodes = Vec::new();
-        nodes.try_reserve_exact(count)?;
+        let mut nodes = try_with_capacity(count)?;
         for _ in 0..count {
             nodes.push(Model::try_new(2)?);
         }
@@ -1231,7 +1230,7 @@ impl DecodeSink for VecSink<'_> {
 /// Bounds decode work and allocation to the frame's declared length
 /// (`docs/format/SPEC.md`, `rust-craft` skill's allocation-discipline):
 /// `output` is reserved fallibly and exactly once, up front, to
-/// `declared_len` (`try_reserve_exact`, so a real allocator failure is
+/// `declared_len` (`try_with_capacity`, so a real allocator failure is
 /// [`Error::OutOfMemory`], not an abort), and every token is rejected the
 /// moment it would grow `output` past that length. A payload lying about the
 /// declared length or the token count therefore cannot cost more work or
@@ -1285,8 +1284,7 @@ pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
     // into `Error::OutOfMemory` instead of the process aborting through
     // `push`'s infallible growth path (hard rule 2, torture-swept by
     // `tests/torture.rs`, #453).
-    let mut output: Vec<u8> = Vec::new();
-    output.try_reserve_exact(declared_len)?;
+    let mut output: Vec<u8> = try_with_capacity(declared_len)?;
 
     let mut sink = VecSink {
         output: &mut output,
