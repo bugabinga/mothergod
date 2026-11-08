@@ -66,9 +66,7 @@
 # past theirs in two days (#676, #677, #690). The last step, `mutants-debt`,
 # files a merged PR's survivors as one issue and leaves an open PR's red on
 # the diff. Its docstring holds the incident and the contract; nothing here
-# restates either. Forks are skipped by the `if:` because their token
-# cannot write issues, and a fork PR's red is the reviewer's to read before
-# merging, same as before.
+# restates either.
 name: mutants-check
 
 on:
