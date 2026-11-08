@@ -178,9 +178,9 @@ Newest first. One line each: date, source, what was adopted or rejected, why.
   --since 7d` on 2026-11-08: 176 runs, 2 errors, both that midnight
   pair); the deslopper's p50 turns 34 to 47.5 with 12 of 16 runs
   shipping a PR is the depletion curve, and its cadence halves the week
-  its no-op share passes half. Context audit: the curator, 3,580 bytes,
-  the fleet's smallest seat: 42 runs since 2026-10-13 on Bash alone, 3
-  denials (the `tools` table); no prompt line fails #486's checks, so no
+  its no-op share passes half. Context audit: the curator, 3,580 bytes:
+  42 runs since 2026-10-13 on Bash alone, 3 denials (the `tools`
+  table); no prompt line fails #486's checks, so no
   cut; the one time bomb was the workflow's tool comment citing one run,
   now the census pointer (#1944); the persona's two em dashes go in
   #1940 with CLAUDE.md's seven, the herald's eight and the 29 of
