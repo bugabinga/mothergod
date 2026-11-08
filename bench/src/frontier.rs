@@ -300,19 +300,19 @@ pub enum Machine<'a> {
 /// Starts with a blank line, as [`format_section`] does.
 #[must_use]
 pub fn format_level_section(level: &Row, field: &[Row], machine: Machine<'_>) -> String {
-    let machine = match machine {
+    let timed = match machine {
         Machine::NamedAbove => "on the machine named above".to_string(),
         Machine::Own(description) => format!(
-            "on its own machine, {description}, in a job of the same run beside the one \
-             above, so compare its rates with this section's rows only"
+            "on another runner of the same pass, so its rates compare with \
+             this section's rows only: {description}"
         ),
     };
     format!(
         "\n## Frontier of {label}: every level of gzip, zstd and xz beside it\n\n\
-         Each row sums this corpus's files. Every process ran one at a time, \
-         {machine}, as the section above describes. `{label}` is timed apart \
-         from the default level because it is the pass's longest row, and \
-         the default's share lines never wait on it (issue #1926).\n\n{}",
+         Each row sums this corpus's files and was timed as the section above \
+         describes, {timed}. `{label}` is timed apart from the default level \
+         because it is the pass's longest row, and the default's share lines \
+         never wait on it (issue #1926).\n\n{}",
         format_level_table(level, field),
         label = level.label,
     )
@@ -546,9 +546,12 @@ best level at least as fast as mothergod -4: xz -9e
                 "{section}"
             );
         }
-        assert!(above.contains("on the machine named above,"), "{above}");
         assert!(
-            own.contains("on its own machine, EPYC, 4 logical core(s), in a job"),
+            above.contains("describes, on the machine named above. "),
+            "{above}"
+        );
+        assert!(
+            own.contains("rows only: EPYC, 4 logical core(s). "),
             "{own}"
         );
     }

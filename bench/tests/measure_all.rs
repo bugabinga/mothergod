@@ -112,7 +112,7 @@ fn apart_section_names_its_own_machine_and_carries_its_own_matrix() {
         "{section}"
     );
     assert!(
-        section.contains(&format!("on its own machine, {},", machine_info())),
+        section.contains(&format!("rows only: {}. ", machine_info())),
         "{section}"
     );
     let table_rows = section.lines().filter(|l| l.starts_with("| ")).count();
