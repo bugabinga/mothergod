@@ -459,8 +459,9 @@ cmp FILE FILE.out</pre>
           fast. <code>-4</code> goes the other way: it also codes every byte
           through one context-mixing model and keeps that file where it is
           smaller. On Silesia, <code>-4</code> writes 1.521 bits/byte at 0.031
-          MB/s and reads it back at 0.100 MB/s, against <code>-3</code>'s 2.448
-          MB/s. Every level writes frames the one decoder reads.
+          MB/s and reads it back at 0.100 MB/s; on the same machine,
+          <code>xz -9e</code> writes at 2.283 MB/s and reads at 93.182 MB/s.
+          Every level writes frames the one decoder reads.
           <code>--version</code> also prints the format version the build reads;
           put it in a bug report.
         </p>

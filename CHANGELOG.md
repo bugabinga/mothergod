@@ -65,13 +65,12 @@ release.
 - cli, library: `-4` (`Level::Extreme`) writes smaller files than `-3` on
   data a context model predicts well: it also codes every byte through one
   context-mixing model and keeps that frame where it is smaller. As the
-  model stands after the three `-4` entries under Changed, that is 0.332
-  bits/byte smaller on average over `bench/`'s 11 synthetic training cases
-  and 0.31 on its two held-out ones, never larger. The price is a slower
-  encode and a far slower decode of the frames it changes: 18.9x to 19.8x
-  the `-3` decode time on those training cases. On real files `-4` is 23.0%
-  smaller than `-3` on the Silesia corpus at about 6x its encode time and
-  40x its decode time, and 22.2% smaller on Canterbury at about 9x and 50x. A
+  model stands after the three `-4` entries under Changed, `-4` is 23.0%
+  smaller than `-3` on the Silesia corpus and 22.2% smaller on Canterbury,
+  smaller than any level of `gzip`, `zstd` or `xz` on both. The price is a
+  slower encode and a far slower decode of the frames it changes; each
+  finals report times both beside every level of the three, on one
+  machine. A
   decoder refuses such a frame past 16 MiB of output, which caps a hostile
   one's decode at about 270 s on a 4-core AMD EPYC 7763 runner, under the
   840 s a hostile `-3` frame takes at its 256 MiB cap on the same runner.
