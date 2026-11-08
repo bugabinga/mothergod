@@ -240,7 +240,7 @@ release.
 
 - perf: decoding a `-3` frame takes 7% to 10% less time on `bench/`'s 11
   synthetic training cases, and every level writes the bytes it wrote
-  (#PRNUM).
+  (#1970).
 - Benchmarks: each finals report times `-4` in a frontier section of its
   own, beside its own run of every gzip, zstd and xz level, so the default
   level's rows and its speed shares can be measured without waiting on the
