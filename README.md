@@ -109,7 +109,8 @@ writes smaller files than `-1`, and faster: the levels shorten the wait, they
 do not make mothergod fast. `-4` goes the other way: it also codes every
 byte through one context-mixing model and keeps that file where it is
 smaller. On Silesia, `-4` writes 1.521 bits/byte at 0.031 MB/s and reads it
-back at 0.100 MB/s, against `-3`'s 2.448 MB/s. Every level writes frames the
+back at 0.100 MB/s; on the same machine, `xz -9e` writes at 2.283 MB/s and
+reads at 93.182 MB/s. Every level writes frames the
 one decoder reads.
 `--version` also prints the format version the build reads; put it in a bug
 report.

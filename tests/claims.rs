@@ -1115,15 +1115,21 @@ fn per_level_figures_match_their_generated_report() {
 }
 
 /// README and site's `-4` sentence quotes its Silesia frontier row's ratio,
-/// encode and decode rates, and `-3`'s decode rate beside them, because
-/// decode is the price a reader weighs `-4` by (issue #1880).
+/// encode and decode rates, and `xz -9e`'s rates beside them, because
+/// decode is the price a reader weighs `-4` by (issue #1880). The `xz -9e`
+/// row is read from `-4`'s own section: that section is timed on another
+/// runner than the first, so only its rows compare with `-4`'s (#1958).
 #[test]
 fn extreme_level_figures_match_their_generated_report() {
     let source = "docs/benchmarks/silesia.md";
-    let three = frontier_numbers("silesia.md", "**mothergod**");
+    let report = read(source);
+    let (_, section) = report
+        .split_once("\n## Frontier of mothergod -4:")
+        .expect("the report has a -4 frontier section");
     let units = ["bits/byte", "MB/s"];
-    let four = frontier_numbers("silesia.md", "**mothergod -4**");
-    let truth: Vec<String> = [four[0], four[1], four[2], three[2]]
+    let four = markdown_numbers(line_containing(section, "**mothergod -4**"));
+    let xz = markdown_numbers(line_containing(section, "| xz -9e |"));
+    let truth: Vec<String> = [four[0], four[1], four[2], xz[1], xz[2]]
         .map(three_decimals)
         .to_vec();
     let name = |index: usize| {
@@ -1131,7 +1137,8 @@ fn extreme_level_figures_match_their_generated_report() {
             "Silesia -4 bits/byte",
             "Silesia -4 encode MB/s",
             "Silesia -4 decode MB/s",
-            "Silesia -3 decode MB/s",
+            "Silesia xz -9e encode MB/s beside -4",
+            "Silesia xz -9e decode MB/s beside -4",
         ][index]
             .to_owned()
     };

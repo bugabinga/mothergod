@@ -20,6 +20,34 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-11-08: Editorial: `-4` is priced against a row timed on its own machine
+
+#1958. 6e51dcd ("bench: publish the reports regenerated at 63821dc7bdda
+(#1967)") is the first pass that times `-4` in its own section, on an
+AMD EPYC 9V45 runner, while `-3` sits in the first section on an EPYC
+7763. The report says the `-4` section's rates "compare with this
+section's rows only". README and `/` still quoted `-4`'s decode rate
+beside `-3`'s, and CHANGELOG's bullet divided one by the other ("about 6x
+and 40x").
+
+**A rate is compared only with a rate timed on the same machine.** README
+and `/` now quote `xz -9e`'s row from `-4`'s own section, raw, no derived
+multiple, and `extreme_level_figures_match_their_generated_report` reads
+both rows from that section. The size gain over `-3` stays: bits/byte
+do not depend on the machine.
+
+**CHANGELOG keeps the size gain and drops the time multiples**, the
+issue's third option. The bullet's figures have rotted three times
+(#1910, #1956, #1968) with no test to catch it. Sizes against `-3` and
+"smaller than any level" survive a re-timing; a cross-runner multiple
+does not. The bullet points at the report for the rates instead. The
+training-case means go too, per the issue's direction: a release
+reader weighs Silesia, not `bench/`'s synthetic cases.
+
+Rejected: naming both runners beside a `-4`/`-3` multiple. It is
+truthful but makes the reader do the discounting, and the two CPUs
+differ by a generation, so the result is not a price anyone pays.
+
 ## 2026-11-08: Editorial: `-4`'s release price, re-read from the version 22 reports
 
 #1910. The `-4` bullet under Added priced `-4` against `-3` from the
