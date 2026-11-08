@@ -23,17 +23,22 @@
 //! it (issue #1321). Only the untimed reference compressors run one
 //! thread per file. `frontier_section` then times every gzip, zstd and xz
 //! level and mothergod's other three levels the same way and appends the
-//! frontier table (issues #1340, #1708, #1824).
+//! frontier table (issues #1340, #1708, #1824), the `-4` level in a
+//! section of its own (`reference::APART`, issue #1926).
 //!
 //! Usage: `cargo run -p mothergod-bench --release --features corpus-fetch
-//! --bin silesia_report`. Markdown is linted, not formatted (`cargo x lint
+//! --bin silesia_report [-- --except-apart | -- --apart-only]`: no flag
+//! writes the whole report; the two flags split it between two runners of
+//! one pass, the second writing its section under `target/bench-report/`
+//! for the pass to append (`reference::Part`). Markdown is linted, not formatted (`cargo x lint
 //! -- docs/benchmarks/silesia.md` to check).
 
 use mothergod_bench::corpus::{ManifestEntry, decompress_silesia, fetch_and_cache, parse_manifest};
 use mothergod_bench::field::run_child_if_requested;
 use mothergod_bench::finals::{Provenance, Versions, format_report};
 use mothergod_bench::reference::{
-    frontier_section, generated_at, machine_info, measure_all, tool_version,
+    Part, frontier_section, generated_at, machine_info, measure_all, tool_version,
+    write_apart_section,
 };
 use mothergod_bench::repo_root;
 use std::path::Path;
@@ -72,6 +77,10 @@ fn main() -> ExitCode {
     if let Some(code) = run_child_if_requested() {
         return code;
     }
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let Ok(part) = Part::from_args(&args).inspect_err(|err| eprintln!("{err}")) else {
+        return ExitCode::FAILURE;
+    };
     let root = repo_root();
 
     let manifest_text = match std::fs::read_to_string(root.join("bench/corpus.toml")) {
@@ -92,6 +101,18 @@ fn main() -> ExitCode {
         }
     };
 
+    let program = match std::env::current_exe() {
+        Ok(program) => program,
+        Err(err) => {
+            eprintln!("failed to locate this binary to time mothergod in: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if part == Part::Apart {
+        return write_apart_section(&root, "silesia.md", &files, &program);
+    }
+
     let (gzip, zstd, xz) = (
         tool_version("gzip"),
         tool_version("zstd"),
@@ -107,14 +128,6 @@ fn main() -> ExitCode {
         }
     };
 
-    let program = match std::env::current_exe() {
-        Ok(program) => program,
-        Err(err) => {
-            eprintln!("failed to locate this binary to time mothergod in: {err}");
-            return ExitCode::FAILURE;
-        }
-    };
-
     let measurements = match measure_all(&files, &program) {
         Ok(measurements) => measurements,
         Err(err) => {
@@ -123,7 +136,7 @@ fn main() -> ExitCode {
         }
     };
 
-    let frontier = match frontier_section(&files, &measurements, &program) {
+    let frontier = match frontier_section(&files, &measurements, &program, part == Part::Whole) {
         Ok(section) => section,
         Err(err) => {
             eprintln!("{err}");

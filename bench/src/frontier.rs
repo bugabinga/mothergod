@@ -169,16 +169,51 @@ pub fn neighbours<'a>(mothergod: &Row, field: &'a [Row]) -> Neighbours<'a> {
 ///
 /// `mothergod` is the default level and carries the bare lines `/status`
 /// reads, `fastest level at least as good: <level>`. Each of `others`, the
-/// other levels a user may pick, `-1`, `-2` and `-4`, carries its own pair, `... as <its label>:
+/// other levels a user may pick, carries its own pair, `... as <its label>:
 /// <level>`, so a level no competitor row sits beside is still placed.
 /// Two last lines carry [`speed_shares`] of the default alone, `encode rate
 /// as a share of xz -9e's: <share>` and its decode twin, `none` where no
 /// share exists, as the neighbour lines print a missing neighbour.
 #[must_use]
 pub fn format_table(mothergod: &Row, others: &[Row], field: &[Row]) -> String {
+    let mut out = table(std::iter::once(mothergod).chain(others), field);
+    neighbour_lines(&mut out, mothergod, "", field);
+    for row in others {
+        neighbour_lines(&mut out, row, &format!(" as {}", row.label), field);
+    }
+
+    let shares = speed_shares(mothergod, field);
+    for (axis, share) in [
+        ("encode", shares.map(|(encode, _)| encode)),
+        ("decode", shares.map(|(_, decode)| decode)),
+    ] {
+        let share = share.map_or_else(|| "none".to_string(), |share| format!("{share:.3}"));
+        writeln!(
+            out,
+            "\n{axis} rate as a share of {SPEED_REFERENCE}'s: {share}"
+        )
+        .expect("writing to a String never fails");
+    }
+    out
+}
+
+/// `level` and `field` as one markdown table, `level` in bold, followed by
+/// `level`'s pair of neighbour lines, `... as <its label>: <level>`: the
+/// table of a level measured apart from the default (issue #1926). No
+/// bare neighbour line and no share line, which belong to the default
+/// alone, so a reader of the first frontier section never meets a second.
+#[must_use]
+pub fn format_level_table(level: &Row, field: &[Row]) -> String {
+    let mut out = table(std::iter::once(level), field);
+    neighbour_lines(&mut out, level, &format!(" as {}", level.label), field);
+    out
+}
+
+/// The markdown table of `mothergod`'s rows, in bold, and `field`'s,
+/// best-compressing first.
+fn table<'a>(mothergod: impl Iterator<Item = &'a Row>, field: &'a [Row]) -> String {
     let mut rows: Vec<(&Row, bool)> = field.iter().map(|r| (r, false)).collect();
-    rows.push((mothergod, true));
-    rows.extend(others.iter().map(|r| (r, true)));
+    rows.extend(mothergod.map(|r| (r, true)));
     // A stable sort: a tie keeps `field`'s order and puts mothergod last.
     rows.sort_by(|(a, _), (b, _)| a.bpb().total_cmp(&b.bpb()));
 
@@ -205,33 +240,20 @@ pub fn format_table(mothergod: &Row, others: &[Row], field: &[Row]) -> String {
         });
         writeln!(out, "| {} |", cells.join(" | ")).expect("writing to a String never fails");
     }
-
-    let lines = std::iter::once((mothergod, String::new()))
-        .chain(others.iter().map(|r| (r, format!(" as {}", r.label))));
-    for (row, of) in lines {
-        let Neighbours { as_good, as_fast } = neighbours(row, field);
-        for (what, neighbour) in [
-            ("fastest level at least as good", as_good),
-            ("best level at least as fast", as_fast),
-        ] {
-            let named = neighbour.map_or("none", |r| r.label.as_str());
-            writeln!(out, "\n{what}{of}: {named}").expect("writing to a String never fails");
-        }
-    }
-
-    let shares = speed_shares(mothergod, field);
-    for (axis, share) in [
-        ("encode", shares.map(|(encode, _)| encode)),
-        ("decode", shares.map(|(_, decode)| decode)),
-    ] {
-        let share = share.map_or_else(|| "none".to_string(), |share| format!("{share:.3}"));
-        writeln!(
-            out,
-            "\n{axis} rate as a share of {SPEED_REFERENCE}'s: {share}"
-        )
-        .expect("writing to a String never fails");
-    }
     out
+}
+
+/// Appends `row`'s two neighbour lines in `field` to `out`, `of` following
+/// the line's subject: empty for the default's bare lines.
+fn neighbour_lines(out: &mut String, row: &Row, of: &str, field: &[Row]) {
+    let Neighbours { as_good, as_fast } = neighbours(row, field);
+    for (what, neighbour) in [
+        ("fastest level at least as good", as_good),
+        ("best level at least as fast", as_fast),
+    ] {
+        let named = neighbour.map_or("none", |r| r.label.as_str());
+        writeln!(out, "\n{what}{of}: {named}").expect("writing to a String never fails");
+    }
 }
 
 /// [`format_table`] under a heading and the conditions that make its rates
@@ -248,19 +270,59 @@ pub fn format_section(mothergod: &Row, others: &[Row], field: &[Row]) -> String 
          MB/s are total bytes over total wall-clock seconds, and peak MiB is \
          the largest resident set of any one process (`/usr/bin/time -f %M`). \
          The speed axis of the neighbour lines is encode MB/s (issue \
-         #1340). `mothergod` is the default level, `-3`; `mothergod -1`, \
-         `mothergod -2` and `mothergod -4` are the other levels, each with \
-         its own neighbour lines (issues #1708, #1824). The last two lines \
-         are the default level's encode and decode MB/s over \
-         {SPEED_REFERENCE}'s in this run (issue #1921).\n\n{}",
+         #1340). `mothergod` is the default level, `-3`; the other bold rows \
+         are the other levels, each with its own neighbour lines (issue \
+         #1708), and the level timed apart has its own section below \
+         (issues #1824, #1926). The last two lines are the default level's encode and \
+         decode MB/s over {SPEED_REFERENCE}'s in this run (issue #1921).\n\n{}",
         format_table(mothergod, others, field)
+    )
+}
+
+/// Where a level measured apart from the default was timed, for
+/// [`format_level_section`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Machine<'a> {
+    /// The process that timed the default timed this level too.
+    NamedAbove,
+    /// Another runner of the same run, described as
+    /// `reference::machine_info` describes one.
+    Own(&'a str),
+}
+
+/// [`format_level_table`] under its own heading, with the machine its rows
+/// were timed on, for appending after [`format_section`] (issue #1926).
+///
+/// `field` is the competitor matrix timed on that `machine`: a rate
+/// compares only with rates from the same machine, so the section repeats
+/// the matrix rather than placing `level` in the default's table, where a
+/// row from another runner would read as a same-machine neighbour.
+/// Starts with a blank line, as [`format_section`] does.
+#[must_use]
+pub fn format_level_section(level: &Row, field: &[Row], machine: Machine<'_>) -> String {
+    let machine = match machine {
+        Machine::NamedAbove => "on the machine named above".to_string(),
+        Machine::Own(description) => format!(
+            "on its own machine, {description}, in a job of the same run beside the one \
+             above, so compare its rates with this section's rows only"
+        ),
+    };
+    format!(
+        "\n## Frontier of {label}: every level of gzip, zstd and xz beside it\n\n\
+         Each row sums this corpus's files. Every process ran one at a time, \
+         {machine}, as the section above describes. `{label}` is timed apart \
+         from the default level because it is the pass's longest row, and \
+         the default's share lines never wait on it (issue #1926).\n\n{}",
+        format_level_table(level, field),
+        label = level.label,
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        Neighbours, Row, SPEED_REFERENCE, format_section, format_table, neighbours, speed_shares,
+        Machine, Neighbours, Row, SPEED_REFERENCE, format_level_section, format_level_table,
+        format_section, format_table, neighbours, speed_shares,
     };
     use crate::field::FieldPoint;
     use crate::finals::FileMeasurement;
@@ -445,6 +507,49 @@ encode rate as a share of xz -9e's: 1.200
 
 decode rate as a share of xz -9e's: 1.000
 "
+        );
+    }
+
+    #[test]
+    fn a_level_apart_has_its_own_table_with_no_bare_or_share_line() {
+        let four = row("mothergod -4", 200_000, 50.0);
+        let field = [row("xz -9e", 240_000, 10.0), row("gzip -9", 330_000, 0.5)];
+        assert_eq!(
+            format_level_table(&four, &field),
+            "\
+| level | b/B | encode MB/s | decode MB/s | peak MiB |
+|---|---|---|---|---|
+| **mothergod -4** | **1.600000** | **0.020** | **2.000** | **1.0** |
+| xz -9e | 1.920000 | 0.100 | 2.000 | 1.0 |
+| gzip -9 | 2.640000 | 2.000 | 2.000 | 1.0 |
+
+fastest level at least as good as mothergod -4: none
+
+best level at least as fast as mothergod -4: xz -9e
+"
+        );
+    }
+
+    #[test]
+    fn a_level_section_names_where_it_was_timed() {
+        let four = row("mothergod -4", 200_000, 50.0);
+        let field = [row("xz -9e", 240_000, 10.0)];
+        let above = format_level_section(&four, &field, Machine::NamedAbove);
+        let own = format_level_section(&four, &field, Machine::Own("EPYC, 4 logical core(s)"));
+        for section in [&above, &own] {
+            assert!(
+                section.starts_with("\n## Frontier of mothergod -4: "),
+                "{section}"
+            );
+            assert!(
+                section.ends_with(&format_level_table(&four, &field)),
+                "{section}"
+            );
+        }
+        assert!(above.contains("on the machine named above,"), "{above}");
+        assert!(
+            own.contains("on its own machine, EPYC, 4 logical core(s), in a job"),
+            "{own}"
         );
     }
 

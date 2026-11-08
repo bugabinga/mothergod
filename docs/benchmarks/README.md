@@ -19,10 +19,12 @@ as the other:
 - **`silesia.md`**: the same shape as `canterbury.md`, over Silesia's 12
   individually pinned files (`research/JOURNAL.md` S2-A52).
 
-Both finals reports end in a frontier section (issue #1340): every level of
-gzip 1 to 9, zstd 1 to 22 and xz 0 to 9e beside mothergod at each of its
-levels (`mothergod -1`, `mothergod -2`, `mothergod -4`, and `mothergod` for
-the default `-3`), one row each, with bits/byte, encode and decode MB/s and peak
+The report binaries end each finals report in two frontier sections (issue
+#1340): every level
+of gzip 1 to 9, zstd 1 to 22 and xz 0 to 9e beside mothergod at
+`mothergod -1`, `mothergod -2` and `mothergod` for the default `-3`, then
+the same competitor levels beside `mothergod -4` in a section of its own
+(issue #1926), one row each, with bits/byte, encode and decode MB/s and peak
 resident set, and the two competitor levels nearest each mothergod level on
 the ratio and encode-speed plane (issue #1708).
 
@@ -66,6 +68,14 @@ the frontier section comes from (issue #1340). The frontier section then
 times every competitor level and mothergod's other three levels one process
 at a time as well (`mothergod_bench::reference::frontier_section`), serial
 for the same reason, so its cost is added on top; the first runner pass reads it.
+`-4`, the longest row, gets a frontier section of its own after the first
+(`reference::APART`, issue #1926). Both report binaries take
+`-- --except-apart`, which writes the report without that section, or
+`-- --apart-only`, which times `-4` and every competitor level and writes
+the section alone, with its own machine line, to `target/bench-report/`
+under the report's name, so two runners of one pass can split the work and
+the second's section is appended to the first's report. No flag does both
+in one process against one competitor run.
 Also by hand, re-run under the same conditions as `finals_report`.
 
 On a runner, all four at once, because the Silesia pass outgrew a

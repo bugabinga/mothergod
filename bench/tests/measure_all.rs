@@ -1,10 +1,11 @@
-//! `reference::measure_all` and `frontier_section` end to end (issue #1340):
+//! `reference::measure_all`, `frontier_section` and `apart_section` end to
+//! end (issues #1340, #1926):
 //! mothergod is timed in a child process, so these need a real binary that
 //! serves child mode, `bench_child`. A unit test inside the lib is its own
 //! test harness and has none.
 
 use mothergod_bench::field::competitors;
-use mothergod_bench::reference::{frontier_section, measure_all};
+use mothergod_bench::reference::{apart_section, frontier_section, machine_info, measure_all};
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -58,24 +59,32 @@ fn frontier_section_has_a_row_per_level_and_mothergod() {
     let files = vec![("a.txt".to_string(), fixture())];
     let measurements = measure_all(&files, Path::new(CHILD))
         .expect("GNU time and the reference compressors must be installed");
-    let section = frontier_section(&files, &measurements, Path::new(CHILD))
+    let whole = frontier_section(&files, &measurements, Path::new(CHILD), true)
         .expect("every level must measure");
-    // The header, every competitor level and mothergod; the divider
-    // starts `|-`.
-    let table_rows = section.lines().filter(|l| l.starts_with("| ")).count();
-    assert_eq!(table_rows, 1 + competitors().len() + 4, "{section}");
-    for label in [
-        "| gzip -1 |",
-        "| zstd -22 |",
-        "| xz -9e |",
-        "| **mothergod -1** |",
-        "| **mothergod -2** |",
-        "| **mothergod -4** |",
-        "| **mothergod** |",
+    let (main, apart) = whole
+        .split_once("\n## Frontier of mothergod -4:")
+        .expect("the whole report carries the apart section");
+    // Each table: the header, every competitor level and its bold rows;
+    // the divider starts `|-`.
+    let table_rows = |text: &str| text.lines().filter(|l| l.starts_with("| ")).count();
+    assert_eq!(table_rows(main), 1 + competitors().len() + 3, "{main}");
+    assert_eq!(table_rows(apart), 1 + competitors().len() + 1, "{apart}");
+    for (text, label) in [
+        (main, "| gzip -1 |"),
+        (main, "| zstd -22 |"),
+        (main, "| xz -9e |"),
+        (main, "| **mothergod -1** |"),
+        (main, "| **mothergod -2** |"),
+        (main, "| **mothergod** |"),
+        (apart, "| xz -9e |"),
+        (apart, "| **mothergod -4** |"),
+        (apart, "on the machine named above"),
+        (apart, "\nfastest level at least as good as mothergod -4: "),
     ] {
-        assert!(section.contains(label), "missing {label}: {section}");
+        assert!(text.contains(label), "missing {label}: {text}");
     }
-    let mothergod_row = section
+    assert!(!apart.contains("share of"), "{apart}");
+    let mothergod_row = main
         .lines()
         .find(|l| l.starts_with("| **mothergod** |"))
         .expect("checked above");
@@ -83,6 +92,31 @@ fn frontier_section_has_a_row_per_level_and_mothergod() {
         !mothergod_row.contains("**-**"),
         "mothergod's peak MiB is measured: {mothergod_row}"
     );
+
+    let except = frontier_section(&files, &measurements, Path::new(CHILD), false)
+        .expect("every level must measure");
+    assert!(!except.contains("mothergod -4"), "{except}");
+    assert_eq!(table_rows(&except), table_rows(main), "{except}");
+}
+
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "needs /usr/bin/time -f and gzip/zstd/xz on PATH"
+)]
+fn apart_section_names_its_own_machine_and_carries_its_own_matrix() {
+    let files = vec![("a.txt".to_string(), fixture())];
+    let section = apart_section(&files, Path::new(CHILD)).expect("every level must measure");
+    assert!(
+        section.starts_with("\n## Frontier of mothergod -4:"),
+        "{section}"
+    );
+    assert!(
+        section.contains(&format!("on its own machine, {},", machine_info())),
+        "{section}"
+    );
+    let table_rows = section.lines().filter(|l| l.starts_with("| ")).count();
+    assert_eq!(table_rows, 1 + competitors().len() + 1, "{section}");
 }
 
 /// Pipes `input` through `program --child <args>`; stdout and success.

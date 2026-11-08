@@ -239,6 +239,10 @@ release.
 
 ### Changed
 
+- Benchmarks: each finals report times `-4` in a frontier section of its
+  own, beside its own run of every gzip, zstd and xz level, so the default
+  level's rows and its speed shares can be measured without waiting on the
+  pass's longest row, about 190 of 261 minutes on Silesia (#1926).
 - cli, library: `-4` writes smaller context-mixing frames on records,
   sampled audio, text and machine code, because its model also reads what
   followed the last one to three bytes before, the position within a
