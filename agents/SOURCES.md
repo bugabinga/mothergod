@@ -182,9 +182,10 @@ Newest first. One line each: date, source, what was adopted or rejected, why.
   the fleet's smallest seat: 42 runs since 2026-10-13 on Bash alone, 3
   denials (the `tools` table); no prompt line fails #486's checks, so no
   cut; the one time bomb was the workflow's tool comment citing one run,
-  now the census pointer; the persona's em dash fixed with CLAUDE.md's
-  six, the herald's eight and the two runbooks' 28 (`em-dash-diff` guards
-  added lines only, so the stock predated it).
+  now the census pointer (#1944); the persona's two em dashes go in
+  #1940 with CLAUDE.md's seven, the herald's eight and the 29 of
+  GOVERNANCE.md and OPERATIONS.md (`em-dash-diff` guards added lines
+  only, so the stock predated it).
 - 2026-11-02: deep survey. Docs-intel round 2026-10-31 (#578): five
   changed reference pages, none added. env-vars re-read:
   `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`,
