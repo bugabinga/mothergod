@@ -133,27 +133,46 @@ jobs:
           cache-bin: false
 
       - name: Mutate the changed lines
-        # 60, from the data (#947): the longest run that finished took 19.6
-        # min (#930, run 37758136497), five codec-wide diffs were cut at 25
-        # in 17 days, and 109 mutants at #690's measured rate (84 decided in
-        # 25 min) need 33. A cut leaves the mutants it never reached with no
-        # outcome; mutants-debt below counts them on every run and files a
-        # merged PR's decode-safety ones with its survivors.
+        # Two clocks. The 55-minute `timeout` is the budget, from the data
+        # (#947): the longest run that finished took 19.6 min (#930, run
+        # 37758136497), five codec-wide diffs were cut at 25 in 17 days,
+        # and 109 mutants at #690's measured rate (84 decided in 25 min)
+        # need 33. Its TERM (which cargo-mutants handles as Ctrl-C, the
+        # ctrlc crate's `termination` feature) stops cargo-mutants, which
+        # has written each outcome as it was decided, so the mutants it
+        # never reached are undecided: mutants-debt below counts them on
+        # every run, annotates the count, and files a merged PR's
+        # decode-safety ones with its survivors. The step's 60 is the hang
+        # ceiling only. GitHub's cut is a `failure` that skips the verdict
+        # and reds the PR for budget, twice in a day on the -4 model PRs
+        # (#1909, #1912; #1939), and a check that reds for budget on every
+        # substantive codec PR trains its readers to ignore it.
+        # --kill-after covers a test child that ignores TERM: KILL three
+        # minutes later, still inside the 60.
         timeout-minutes: 60
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
           git diff --merge-base "origin/$BASE_REF" HEAD -- src > pr.diff
+          budget=3300
+          SECONDS=0
           set +e
-          cargo mutants --config tests/mutants.toml --package mothergod --in-diff pr.diff --timeout-multiplier 10 -j 4
+          timeout --kill-after=3m "${budget}s" \
+            cargo mutants --config tests/mutants.toml --package mothergod --in-diff pr.diff --timeout-multiplier 10 -j 4
           status=$?
           set -e
           # 2 and 3 are outcomes cargo-mutants reports, not a broken run; the
-          # verdict step below judges them from missed.txt. Exiting here on
-          # either would red a PR for a timeout, which is an undecided mutant
-          # and not evidence of a missing test.
+          # verdict step below judges them from missed.txt. 124 is the budget
+          # above, 137 the same budget when TERM was ignored and the KILL
+          # did it; a KILL before the budget is somebody else's (the OOM
+          # killer) and stays a red. Exiting here on a budget cut would red a
+          # PR for a timeout, which is an undecided mutant and not evidence
+          # of a missing test.
           case $status in
             0 | 2 | 3) ;;
+            124 | 137)
+              [ "$SECONDS" -ge "$budget" ] || { echo "cargo-mutants killed at ${SECONDS}s, before the budget (exit $status)"; exit 1; }
+              echo "cargo-mutants cut at the ${budget}s budget (exit $status): the mutants it never reached are undecided, counted by mutants-debt below" ;;
             *) echo "cargo-mutants could not complete (exit $status)"; exit 1 ;;
           esac
 

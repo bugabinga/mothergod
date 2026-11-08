@@ -31,6 +31,8 @@ if raw["fn"] == "decide":
     print(json.dumps({"verdict": verdict, "detail": detail}))
 elif raw["fn"] == "territory":
     print(json.dumps([mod.in_territory(line) for line in raw["lines"]]))
+elif raw["fn"] == "cut_notice":
+    print(json.dumps(mod.cut_notice(debt())))
 elif raw["fn"] == "triage":
     print(json.dumps(dataclasses.asdict(mod.triage(raw["missed"], raw["undecided"], raw["generated"]))))
 elif raw["fn"] == "read_report":
@@ -256,6 +258,15 @@ test("render's per-mutant run is a regex of the text, not the name (#1121)", () 
     out.body,
   );
   assert.ok(!out.body.includes("209:43: replace || with && in run'"), "the line is off the pattern");
+});
+
+// A cut run stays green since #1939, so its never-run count is the one
+// annotation on the checks tab; a complete run must not print one.
+test("cut_notice annotates the never-run count on a cut run and nothing on a complete one", () => {
+  const cut = call({ fn: "cut_notice", undecided, undecided_outside: 18, generated: 104 });
+  assert.match(cut, /^::notice::20 of 104 mutants never ran: /);
+  assert.match(cut, /undecided, not counted against this diff$/);
+  assert.equal(call({ fn: "cut_notice", missed: [survivors[0]], generated: 4 }), "");
 });
 
 test("render keeps line and column only for a mutant that names no function (#1121 review)", () => {
