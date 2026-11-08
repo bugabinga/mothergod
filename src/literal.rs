@@ -985,9 +985,9 @@ impl Literal {
                 logistic_mix_node(&prefix, &mixer.weights[weight_index], lo, mid, hi);
             let p = clamp_logistic_probability(squash(dot));
             let node_context = bittree::sse_context(depth, node_prefix);
-            let refined = mixer.sse.refine(node_context, p);
-            let bit = code_bit(mid, refined);
-            mixer.sse.update(node_context, p, bit);
+            let bit = mixer
+                .sse
+                .refine_then_update(node_context, p, |refined| code_bit(mid, refined));
             let rate = surprise_rate(
                 mixer.recent_sq_error[weight_index],
                 mixer.baseline_sq_error[weight_index],
