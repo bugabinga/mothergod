@@ -65,6 +65,7 @@ import subprocess
 import sys
 
 from app_token import prefer_file
+from citation import bare_hashes, complaint, writer_present
 from footer import attribute
 from secret_scrub import scrub
 import stdin_body
@@ -147,6 +148,14 @@ def main() -> int:
     if rewritten:
         print(f"gh-pr: rewrote {rewritten} closing line(s) to one keyword per "
               "issue; GitHub links only the first number of a list (#1349)",
+              file=sys.stderr)
+    # A bare hash is A2's defect (CLAUDE.md Voice); refused where the writer
+    # can fix it, warned where a workflow step posts a fixed body (citation.py).
+    bare = bare_hashes(body)
+    if bare:
+        if writer_present():
+            die(complaint(bare))
+        print(f"gh-pr: {complaint(bare)}; posted anyway, no writer present",
               file=sys.stderr)
     full_body, stripped = attribute(body, role)
     if stripped:

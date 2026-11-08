@@ -239,6 +239,22 @@ test("a body with no opener reaches gh unchanged", () => {
   assert.equal(stderr, "");
 });
 
+// CLAUDE.md Voice A2 (citation.py): the session that wrote the bare hash is
+// refused before gh is reached; a workflow step with no writer is warned and
+// posts. CLAUDECODE is set or unset here explicitly, never inherited, so the
+// result does not depend on the shell running the suite.
+test("a bare hash is refused in a model session and warned past without one", () => {
+  const body = "The pass that contains df405fc.";
+  const session = run(["489"], { body, env: { CLAUDECODE: "1" } });
+  assert.equal(session.status, 1);
+  assert.deepEqual(session.calls, []);
+  assert.match(session.stderr, /bare commit hash df405fc/);
+  const step = run(["489"], { body, env: { CLAUDECODE: undefined } });
+  assert.equal(step.status, 0);
+  assert.match(step.called.argv[4], /^The pass that contains df405fc\.\n\n---/);
+  assert.match(step.stderr, /bare commit hash df405fc.*posted anyway, no writer present/);
+});
+
 test("commenting and closing keep their shapes", () => {
   assert.deepEqual(run(["489"]).called.argv.slice(0, 2), ["issue", "comment"]);
   assert.deepEqual(run(["489", "--close"]).called.argv.slice(0, 2), ["issue", "close"]);
