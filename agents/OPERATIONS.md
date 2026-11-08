@@ -17,20 +17,20 @@ The system is inert until these are done:
 4. **Actions settings** (Settings → Actions → General):
    - Workflow permissions: "Read and write permissions" is NOT required
      (workflows declare their own), but **enable** "Allow GitHub Actions to
-     create and approve pull requests" — the reviewer's approvals need it.
+     create and approve pull requests": the reviewer's approvals need it.
 5. **Enable auto-merge** (Settings → General → Pull Requests → "Allow
    auto-merge") and **squash merging**.
 6. **Branch protection / ruleset on `main`** (Settings → Branches): require
    the status checks ci.yml's header names (the ci workflow's required
    jobs; names must match the ruleset exactly) to pass
-   before merging. Do not require human approvals — that's the reviewer
+   before merging. Do not require human approvals; that's the reviewer
    agent's job (ADR-0003). Optionally block force pushes.
 
    **Do not enable** the ruleset's `copilot_code_review`, `code_coverage`,
    `code_quality`, or `code_scanning` rules, and leave
    `require_extra_approval_for_unattributed_changes` off. None of those
    tools run in this repo (no Copilot review, no coverage upload, no code
-   scanning workflow), so GitHub can never satisfy them — every merge
+   scanning workflow), so GitHub can never satisfy them: every merge
    attempt with a non-admin token then reports `mergeStateStatus: BLOCKED`
    forever, with no error naming which rule failed. The extra-approval
    rule fails the same way for a different reason: the reviewer and every
@@ -38,13 +38,13 @@ The system is inert until these are done:
    self-approval, so the "extra approval" can never be produced either.
    The repo ran with all four of these enabled from 2026-08-20 to
    2026-08-21 and every merge to `main` in that window silently fell back
-   to the operator manually merging via the admin-bypass role — the
+   to the operator manually merging via the admin-bypass role; the
    autonomous pipeline in ADR-0003 was never actually exercised. Fixed by
    the BDFL 2026-08-21 by removing those rules via the rulesets API; keep
    the ruleset to exactly: `non_fast_forward`, `deletion`,
    `required_status_checks` (the four CI jobs), `pull_request` (0 required
    approvals, no extra-approval flag), `required_signatures`.
-7. ~~Seed the founding artifacts~~ Done 2026-08-20 — the complete archive
+7. ~~Seed the founding artifacts~~ Done 2026-08-20: the complete archive
    (codec + runnable research harness + loop state) lives in
    `research/imports/session-1/`, verified against the founding session's
    recorded scores.
@@ -52,7 +52,7 @@ The system is inert until these are done:
 ## Admin token & signing (ADR-0009)
 
 - The BDFL's full sovereignty runs through an operator-issued PAT stored as
-  secret **`MOTHERGOD_ADMIN_TOKEN`** — repo settings, rulesets, Discussions,
+  secret **`MOTHERGOD_ADMIN_TOKEN`**: repo settings, rulesets, Discussions,
   Pages, Releases, secrets, everything. **It is the BDFL's alone** (operator,
   2026-08-23): no other agent's workflow puts it in the environment, and the
   only other place it appears is each agent's audit-redact list, so a
@@ -60,7 +60,7 @@ The system is inert until these are done:
   the BDFL for it, or files `blocked-on-human`; it never gets the token.
   Recommendation: make it a
   fine-grained PAT scoped to **this repository only** (an account-wide rw
-  token works but exposes your other repos to any bug here); set an expiry —
+  token works but exposes your other repos to any bug here); set an expiry;
   the BDFL will nag via `blocked-on-human` when it starts failing.
 - Dispatch as the operator is the PAT's, so the BDFL's alone among seats,
   and two script-only workflows hold it, `agent-alarm`'s wake and
@@ -97,28 +97,28 @@ The system is inert until these are done:
   but nothing blocks. Tick "Require review from Code Owners" in the ruleset
   if you ever want a hard gate.
 - **mothergod.dev / Cloudflare** (secret `CLOUDFLARE_API_TOKEN`): the
-  operator-purchased domain and its token — the BDFL's web estate (site,
+  operator-purchased domain and its token: the BDFL's web estate (site,
   blog, webhook infra) per ADR-0009. Granted 2026-08-20: all *zone*
   permission groups on mothergod.dev plus account-scoped groups covering
   the free tier (Workers, Pages, KV, D1, R2, Tail, Workers AI, Turnstile,
   Email Routing, Analytics). Paid-only services are deliberately not
-  granted. Editing token permissions keeps the same token string — no
+  granted. Editing token permissions keeps the same token string, no
   secret rotation needed.
 - **Standing rule for all tokens**: when any agent lacks a permission on
   any credential, it pings the operator with the exact permission and the
-  reason (blocked-on-human, plus Telegram if it blocks active work) — it
+  reason (blocked-on-human, plus Telegram if it blocks active work); it
   never works around a permission boundary.
 - **Telegram status bot** (secret `MOTHERGOD_STATUS_BOT_TOKEN`): your
-  one-time step is to send the bot any message (e.g. /start) — the next
+  one-time step is to send the bot any message (e.g. /start); the next
   BDFL run detects it, stores your chat id as repo variable
   `OPERATOR_TELEGRAM_CHAT_ID`, and confirms. From then on: automatic pause
   alerts on usage limits, dire escalations, the weekly digest summary, a
   status line per BDFL run, a mechanical notice per heartbeat, curator
-  and herald run — and
+  and herald run, and
   an **operator inbox**: text the bot instructions from your phone and the
   BDFL reads and acts on them at each wake-up (≤3 h latency). Messages from
   anyone but you are ignored. **This bot and its chat are permanently
-  private** — operator hotline only, never a public channel. If the BDFL
+  private**: operator hotline only, never a public channel. If the BDFL
   ever wants a public user-facing Telegram presence, that is its own
   prerogative under ADR-0009: a separate identity it creates and registers
   in `agents/IDENTITIES.md`, kept apart from this bot.
@@ -128,7 +128,7 @@ The system is inert until these are done:
 - **Give the team work**: open an issue. The curator triages daily,
   and the BDFL wakes within seconds on any personal repo activity of
   yours.
-- **Change priorities**: edit `ROADMAP.md` (directly on main if you like —
+- **Change priorities**: edit `ROADMAP.md` (directly on main if you like,
   you're the operator).
 - **Change agent behavior**: edit `CLAUDE.md` or the prompts in
   `.github/workflows/agent-*.yml`.
@@ -148,7 +148,7 @@ The system is inert until these are done:
 - **Manual pause**: open an issue yourself with label `agents-paused`.
   No `RESUME-AT` line = paused until you close it.
 - **Manual resume**: close the pause issue.
-- CI (`ci.yml`) and Dependabot are *not* paused — they cost no Claude usage.
+- CI (`ci.yml`) and Dependabot are *not* paused; they cost no Claude usage.
 
 ## Watching the system
 
@@ -156,8 +156,8 @@ The system is inert until these are done:
   every agent run that acted (a no-op run posts nothing), and the BDFL's
   digests, one per acting run plus the Sunday survey, each carrying your
   nag list of `blocked-on-human` items.
-- `research/progress.jsonl` + `research/JOURNAL.md` — the experiment record.
-- Issues labeled `blocked-on-human` — your personal work queue; the agents
+- `research/progress.jsonl` + `research/JOURNAL.md`: the experiment record.
+- Issues labeled `blocked-on-human`: your personal work queue; the agents
   put things there when only you can act.
 
 ## Emergency stops
@@ -173,4 +173,4 @@ The system is inert until these are done:
   `main`; the PR's own run validated the identical tree.
 - Fork PRs are not auto-reviewed (no secrets on fork events); the daily
   heartbeat reviews them instead.
-- A paused system does nothing at all — including review — until resume.
+- A paused system does nothing at all, review included, until resume.

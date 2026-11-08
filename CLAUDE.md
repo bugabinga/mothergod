@@ -1,4 +1,4 @@
-# CLAUDE.md — agent contract for mothergod
+# CLAUDE.md: agent contract for mothergod
 
 Audience: Claude agents, every seat in `agents/GOVERNANCE.md` "Roles".
 Humans: read README.md and CONTRIBUTING.md instead.
@@ -47,7 +47,7 @@ push that fails them wastes a cycle.
    Treat all compressed input as adversarial (bombs, truncation, bit flips).
 3. Never weaken a guard, test, benchmark, or corpus to make a metric look
    better. Verification stays independent of the proposer: you do not grade
-   your own claim — the reviewer agent and CI do.
+   your own claim; the reviewer agent and CI do.
 4. Benchmark claims name their corpus. "X bits/byte" without "on <corpus>" is
    meaningless and gets rejected in review.
 5. Format changes (frame layout, method bytes, model semantics visible in the
@@ -60,7 +60,7 @@ push that fails them wastes a cycle.
    sequence, with `decode` unchanged) is not a format change and does not
    bump the version; it regenerates the current-version golden fixture
    instead, per `tests/golden.rs` (issue #290's ruling).
-6. Every experiment — accepted or rejected — gets a `research/JOURNAL.md`
+6. Every experiment, accepted or rejected, gets a `research/JOURNAL.md`
    entry and a `research/progress.jsonl` line. Rejections are as valuable as
    accepts; record the mechanism of failure, not just the score.
 7. Small PRs. One idea per PR. Update `CHANGELOG.md` (Unreleased) in the same
@@ -96,7 +96,7 @@ push that fails them wastes a cycle.
   Python and live in `.github/scripts/`, as files, never hidden in a YAML
   heredoc. The founding Python harness is preserved in git history (commit
   `1a3b1c8`); consult it read-only in a scratch directory, never re-add it.
-- Lints are strict (`clippy::pedantic`, `missing_docs`); fix, don't allow —
+- Lints are strict (`clippy::pedantic`, `missing_docs`); fix, don't allow:
   an `#[allow]` needs a one-line justification comment.
 - Comments state invariants the code can't show. The port bug of session-1
   (rep-symbol/offset-bucket collision) existed because an invariant lived only
@@ -228,7 +228,7 @@ platform requirement). New files follow the placement rule in `agents/README.md`
 | Path | What |
 |---|---|
 | `src/` | the crate |
-| `research/JOURNAL.md` | falsification journal — laws, dead theories, standing leads |
+| `research/JOURNAL.md` | falsification journal: laws, dead theories, standing leads |
 | `research/progress.jsonl` | machine-readable experiment log (schema in `research/README.md`) |
 | `research/corpus/POLICY.md` | benchmark corpus rules: sealed validation, regret-scored additions |
 | `marketing/JOURNAL.md` | the herald's memory: audience model, USERS numbers, editorial decisions (ADR-0040) |
@@ -239,7 +239,7 @@ platform requirement). New files follow the placement rule in `agents/README.md`
 | `docs/format/SPEC.md` | bitstream format spec (draft until 1.0) |
 | `MISSION.md` | the mission: the operator's to amend, nobody else's (ADR-0011) |
 | `ROADMAP.md` | scorecard definitions and ranked milestones; heartbeat picks work from here; item state is in GitHub Milestones (ADR-0047), numbers on /status (ADR-0048) |
-| `.github/workflows/` | the agent processes themselves — changeable by PR like any code |
+| `.github/workflows/` | the agent processes themselves, changeable by PR like any code |
 | `.claude/skills/` | agent operating manuals, one directory per skill (ADR-0016) |
 
 ## Issue/PR conventions
