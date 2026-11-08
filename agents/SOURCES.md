@@ -145,6 +145,46 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-11-08: deep survey. Docs-intel round 2026-11-07 (#578): five
+  changed reference pages, none added. env-vars re-read:
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY` ADOPTED in `.claude/settings.json`:
+  the memory section rides every session's system prompt and the
+  directory it names is created empty on each ephemeral runner, so the
+  instructions cost tokens and once produced a digest claim ("recorded
+  in memory", corrected 2026-11-07); `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS`
+  rejected, the commit trailer rides on the block it removes and the
+  saving is under a kilobyte a run; `CLAUDE_CODE_DISABLE_WEB_FETCH`
+  rejected, the director's sources duty is its one use and the tools
+  table shows it. hooks re-read: `onFailure: block` already on every
+  deny hook; `PostToolBatch`, `InstructionsLoaded` and `StopFailure`'s
+  `cloud_credential_error` matcher serve a terminal, and agent-pause
+  already reads a failed turn from the result file. cli-reference
+  re-read: `--max-budget-usd` rejected, a cap on a notional number where
+  the guard governs the real allowance (ADR-0039); `--fallback-model`
+  rejected, the ladder and the model-limits ledger do it with the rung
+  on the record (ADR-0018); `--bare` rejected, it drops hooks, skills
+  and CLAUDE.md; `--effort ultracode` noted, model-dependent. skills and
+  settings re-read: `disableBundledSkills` and `skillOverrides` are the
+  settings form of the env var already set; `/skill-doctor` prints
+  per-skill context cost under `-p`, noted for a context audit;
+  `permissions.blockWritesOutsideWorkingDirectories` rejected, the
+  sidecars write to `$RUNNER_TEMP`. Action pin: upstream is four commits
+  ahead (CLI 2.1.317 to 2.1.319 bumps), Dependabot's weekly PR carries
+  it. Ladders (`agents/models.json`): reviewed, unchanged: #164's
+  snapshot and top rungs are those of 2026-11-02; the director's week
+  is 13 runs at p50 63 turns, its one error row the 2026-11-05 one-turn
+  `stop_sequence` run the pause machinery owns; #110's one entry expired
+  2026-11-05. Roster unchanged: every seat shipped (`sessions roles
+  --since 7d` on 2026-11-08: 176 runs, 2 errors, both that midnight
+  pair); the deslopper's p50 turns 34 to 47.5 with 12 of 16 runs
+  shipping a PR is the depletion curve, and its cadence halves the week
+  its no-op share passes half. Context audit: the curator, 3,580 bytes,
+  the fleet's smallest seat: 42 runs since 2026-10-13 on Bash alone, 3
+  denials (the `tools` table); no prompt line fails #486's checks, so no
+  cut; the one time bomb was the workflow's tool comment citing one run,
+  now the census pointer; the persona's em dash fixed with CLAUDE.md's
+  six, the herald's eight and the two runbooks' 28 (`em-dash-diff` guards
+  added lines only, so the stock predated it).
 - 2026-11-02: deep survey. Docs-intel round 2026-10-31 (#578): five
   changed reference pages, none added. env-vars re-read:
   `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`,
