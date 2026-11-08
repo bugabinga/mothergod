@@ -12,24 +12,26 @@
 //! [`RULES`] entry matches decides the stage. Inlining is why the chain and
 //! not the symbol: `upper_half_masses` and the walk both compile into
 //! `decode_logit_sse`, and `ln` runs inside both `logistic_mix_node` and
-//! `locate`, so the symbol alone cannot tell them apart. Callers beyond the
-//! leaf are not read: a release build omits frame pointers, so `-g`'s chain
-//! past the leaf is unreliable, and an out-of-line `floor` called by
-//! `locate` counts as [`Stage::Libm`], not as SSE (S2-R43 split those by
-//! hand).
+//! `Logit::position`, so the symbol alone cannot tell them apart. Callers
+//! beyond the leaf are not read: a release build omits frame pointers, so
+//! `-g`'s chain past the leaf is unreliable, and a libm function an SSE
+//! function calls out of line counts as [`Stage::Libm`], not as SSE
+//! (S2-R43 split those by hand).
 
 use std::fmt::Write as _;
 
 /// One row of the stage table, in the order the table prints.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
-    /// The literal model's SSE lookup.
-    SseLocate,
+    /// The literal model's SSE per node: locating the bin pair, reading it,
+    /// nudging it.
+    Sse,
     /// The literal model's six-expert logistic mix per node.
     Mix,
     /// Each expert's bank mass over a bit-tree node's upper half.
     UpperMasses,
-    /// The bit-tree walk: squash, SSE refine and update, gradients.
+    /// The bit-tree walk: squash, gradients, and the loop around the SSE
+    /// call.
     Walk,
     /// The range decoder's literal bit.
     BitDecode,
@@ -54,7 +56,7 @@ pub enum Stage {
 impl Stage {
     /// Every stage, in the order the table prints.
     pub const ALL: [Stage; 13] = [
-        Stage::SseLocate,
+        Stage::Sse,
         Stage::Mix,
         Stage::UpperMasses,
         Stage::Walk,
@@ -73,7 +75,7 @@ impl Stage {
     #[must_use]
     pub const fn area(self) -> &'static str {
         match self {
-            Stage::SseLocate
+            Stage::Sse
             | Stage::Mix
             | Stage::UpperMasses
             | Stage::Walk
@@ -115,8 +117,17 @@ impl Stage {
 /// name is defined once, two where it is not (`Model::decode`); a test
 /// holds that, so a renamed function fails CI instead of moving its time
 /// to [`Stage::Rest`].
+///
+/// The SSE rules name each function the literal path enters `src/sse.rs`
+/// through, because inlining decides which one a chain shows: after #1970
+/// `Logit::position` is out of line and `locate` is in no chain (#1973).
+/// Functions only those call (`interpolate`, `learn`, `split_position`)
+/// need no rule: a chain prints every inlined level, so a ruled caller
+/// sits between them and any frame of another stage.
 pub const RULES: &[(&[&str], Stage)] = &[
-    (&["locate"], Stage::SseLocate),
+    (&["locate"], Stage::Sse),
+    (&["Logit", "position"], Stage::Sse),
+    (&["refine_then_update"], Stage::Sse),
     (&["logistic_mix_node"], Stage::Mix),
     (&["upper_half_masses"], Stage::UpperMasses),
     (&["walk_nodes"], Stage::Walk),
@@ -402,6 +413,41 @@ mod tests {
 \t    5a2aff29cf30 <mothergod::Frames as core::iter::traits::iterator::Iterator>::next (mothergod)\n\
 \t    5a2aff29d000 <mothergod::literal::Literal>::decode_logit_sse (mothergod)\n";
 
+    /// The SSE leaf chains of a `-3` decode after #1970 (perf 7.0.14,
+    /// binary path cut, #1973): `Logit::position` out of line, under it
+    /// `ln` and `stretch` or `split_position` inlined, and `interpolate`
+    /// and `learn` inlined into `refine_then_update`. The last sample is
+    /// built, not recorded: `refine_then_update` inlined into the walk,
+    /// whose frame must not claim it.
+    const SSE_SCRIPT: &str = "   1001001 \n\
+\t    5f61f85675e2 ln (inlined)\n\
+\t    5f61f85675e2 stretch (inlined)\n\
+\t    5f61f85675e2 <mothergod::sse::Logit as mothergod::sse::Spacing>::position (mothergod)\n\
+\n\
+   1001001 \n\
+\t    5f61f8571c90 <mothergod::sse::Logit as mothergod::sse::Spacing>::position (mothergod)\n\
+\n\
+   1001001 \n\
+\t    5f61f8571eb8 split_position (inlined)\n\
+\t    5f61f8571eb8 <mothergod::sse::Logit as mothergod::sse::Spacing>::position (mothergod)\n\
+\n\
+   1001001 \n\
+\t    5f61f856f146 interpolate<mothergod::sse::Logit> (inlined)\n\
+\t    5f61f856f146 <mothergod::sse::Table<mothergod::sse::Logit>>::refine_then_update::<<mothergod::literal::Literal>::walk_logit_sse<<mothergod::literal::Literal>::decode_logit_sse::{closure#0}>::{closure#2}::{closure#0}> (mothergod)\n\
+\n\
+   1001001 \n\
+\t    5f61f856f18f learn<mothergod::sse::Logit> (inlined)\n\
+\t    5f61f856f18f <mothergod::sse::Table<mothergod::sse::Logit>>::refine_then_update::<<mothergod::literal::Literal>::walk_logit_sse<<mothergod::literal::Literal>::decode_logit_sse::{closure#0}>::{closure#2}::{closure#0}> (mothergod)\n\
+\n\
+   1001001 \n\
+\t    5f61f856f100 <mothergod::sse::Table<mothergod::sse::Logit>>::refine_then_update::<<mothergod::literal::Literal>::walk_logit_sse<<mothergod::literal::Literal>::decode_logit_sse::{closure#0}>::{closure#2}::{closure#0}> (mothergod)\n\
+\n\
+   1001001 \n\
+\t    5f61f856e0a0 learn<mothergod::sse::Logit> (inlined)\n\
+\t    5f61f856e0a0 refine_then_update<mothergod::sse::Logit, <mothergod::literal::Literal>::walk_logit_sse::{closure#2}::{closure_env#0}> (inlined)\n\
+\t    5f61f856e0a0 {closure#2}<mothergod::literal::{impl#5}::decode_logit_sse::{closure_env#0}> (inlined)\n\
+\t    5f61f856e0a0 mothergod::bittree::walk_nodes::<<mothergod::literal::Literal>::walk_logit_sse<<mothergod::literal::Literal>::decode_logit_sse::{closure#0}>::{closure#2}> (mothergod)\n";
+
     fn period(tally: &Tally, stage: Stage) -> u64 {
         tally.periods[Stage::ALL.iter().position(|s| *s == stage).expect("listed")]
     }
@@ -454,6 +500,13 @@ mod tests {
             rule_stage("<mothergod::literal::Literal>::update"),
             Some(Stage::LiteralRest)
         );
+        // `position` is defined three times; only `Logit`'s is the
+        // literal model's.
+        assert_eq!(rule_stage("position"), None);
+        assert_eq!(
+            rule_stage("<mothergod::sse::Linear as mothergod::sse::Spacing>::position"),
+            None
+        );
         assert_eq!(rule_stage("exp_unbiased"), None);
         assert_eq!(
             rule_stage("compiler_builtins::math::libm_math::floor::floor"),
@@ -468,12 +521,20 @@ mod tests {
         assert_eq!(tally.samples, 5);
         assert_eq!(period(&tally, Stage::UpperMasses), 1_001_001);
         assert_eq!(period(&tally, Stage::Kernel), 2_000_000);
-        assert_eq!(period(&tally, Stage::SseLocate), 1_001_001);
+        assert_eq!(period(&tally, Stage::Sse), 1_001_001);
         assert_eq!(period(&tally, Stage::Libc), 1_001_001);
         // The checksum's chain names no rule, and its caller is past the
         // leaf, so `decode_logit_sse` does not claim it.
         assert_eq!(period(&tally, Stage::Rest), 1_001_001);
         assert_eq!(tally.total(), 6_004_004);
+    }
+
+    #[test]
+    fn every_sse_chain_lands_in_the_sse_row() {
+        let mut tally = Tally::default();
+        tally.add(SSE_SCRIPT).expect("well-formed");
+        assert_eq!(tally.samples, 7);
+        assert_eq!(period(&tally, Stage::Sse), tally.total());
     }
 
     #[test]
@@ -509,7 +570,11 @@ mod tests {
         let table = format_table(&tally);
         let rows: Vec<&str> = table.lines().collect();
         assert_eq!(rows.len(), 2 + Stage::ALL.len() + 1, "{table}");
-        assert_eq!(rows[2], "| literal: `locate` | 16.7% | 0.00 |", "{table}");
+        assert_eq!(
+            rows[2],
+            "| literal: `locate`, `Logit::position`, `refine_then_update` | 16.7% | 0.00 |",
+            "{table}"
+        );
         assert_eq!(rows[4], "| literal: `upper_half_masses` | 16.7% | 0.00 |");
         assert_eq!(rows[13], "| kernel | 33.3% | 0.00 |");
         assert_eq!(rows[15], "| total | 100.0% | 0.01 |");
