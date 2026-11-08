@@ -20,6 +20,27 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-11-08: Editorial: `-4`'s release price, re-read from the version 22 reports
+
+#1910. The `-4` bullet under Added priced `-4` against `-3` from the
+2026-11-06 reports: 12.2% smaller on Silesia at 3.1x encode and 14.5x
+decode time. 746cf1e ("bench: publish the reports regenerated at
+628361239975 (#1937)") published version 22 reports, a pass that contains
+df405fc. Their frontier rows give 23.0% smaller at 6.2x and 40.7x on
+Silesia, and 22.2% at 9.0x and 50.6x on Canterbury. The release reader was
+told about half the gain and about a third of the decode price.
+
+**Ratios keep a decimal; time multiples get "about" and one or two
+digits.** The b/B columns carry six digits, so 23.0% is exact. The MB/s
+columns carry three decimals, and `-4`'s encode rate is 0.024, so its
+rounding alone spans 6.1x to 6.3x. "About 6x" and "about 40x" name what
+the run can support. The qualifier "as the model stands after the three
+`-4` entries under Changed" now opens the two present-tense sentences,
+the price and the hostile-decode cap, once instead of trailing the cap.
+
+No test holds these figures, as on 2026-11-07, because CHANGELOG has no
+generated source. The next model change to `-4` stales them again.
+
 ## 2026-11-07: Editorial: the roadmap's head moved, and the surface said ratio
 
 #1923. ADR-0084 put M9, the default level's speed, at the top of
