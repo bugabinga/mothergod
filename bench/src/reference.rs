@@ -8,11 +8,11 @@
 
 use crate::field::{LEVELS, competitors, level_label, measure, measure_mothergod};
 use crate::finals::FileMeasurement;
-use crate::frontier::{Row, format_section};
+use crate::frontier::{Machine, Row, format_level_section, format_section};
 use mothergod::Level;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, ExitCode};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Writes `data` to a fresh file under `std::env::temp_dir()`, unique per
@@ -277,44 +277,109 @@ pub fn measure_all(
         .collect()
 }
 
-/// The frontier section of a finals report (issue #1340): every level of
-/// gzip, zstd and xz measured on `files`, one process at a time, beside the
-/// mothergod row `measurements` already holds and a row for each other
-/// level, timed in a child of `mothergod_program` as [`measure_all`] times
-/// the default (issue #1708).
-///
-/// Serial by design, the rule [`measure_all`] states for mothergod: a
-/// wall-clock taken beside another measurement is not a rate. It is the
-/// longest part of a report run, one `field::measure` per level per file,
-/// and prints a line per level because nothing else shows it alive.
-///
-/// # Errors
-///
-/// Returns an error naming the level and file if any `field::measure` or
-/// `field::measure_mothergod` fails.
-pub fn frontier_section(
+/// The level a finals report times apart from the default, in its own
+/// section, so that one report pass can split in two jobs (issue #1926):
+/// the pass's longest row, about 190 of a 261-minute pass.
+pub const APART: Level = Level::Extreme;
+
+/// Which part of a finals report one run of a report binary measures and
+/// writes (issue #1926), read off its command line by [`Part::from_args`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Part {
+    /// No argument: the whole report, the [`APART`] section included and
+    /// timed on the one machine, against the one competitor matrix.
+    Whole,
+    /// `--except-apart`: the report without the [`APART`] section, which a
+    /// [`Part::Apart`] run on another runner of the same pass supplies.
+    ExceptApart,
+    /// `--apart-only`: the [`APART`] section alone, with the competitor
+    /// matrix it is read against and its own machine line, for appending to
+    /// a [`Part::ExceptApart`] report.
+    Apart,
+}
+
+impl Part {
+    /// The part `args`, a report binary's arguments after its name, select.
+    ///
+    /// # Errors
+    ///
+    /// Returns a usage line for anything but no argument or one of the two
+    /// flags.
+    pub fn from_args(args: &[String]) -> Result<Self, String> {
+        match args {
+            [] => Ok(Part::Whole),
+            [flag] if flag == "--except-apart" => Ok(Part::ExceptApart),
+            [flag] if flag == "--apart-only" => Ok(Part::Apart),
+            _ => Err(format!(
+                "unexpected arguments {args:?}; usage: [--except-apart | --apart-only], \
+                 no flag for the whole report"
+            )),
+        }
+    }
+}
+
+/// Where a [`Part::Apart`] run writes the section for `report`, a finals
+/// report's file name such as `silesia.md`: beside the cargo output, not
+/// under `docs/`, because it is part of a report and never published alone.
+/// The pass appends it to the [`Part::ExceptApart`] run's `docs/benchmarks/`
+/// file of the same name.
+#[must_use]
+pub fn apart_section_path(root: &Path, report: &str) -> PathBuf {
+    root.join("target/bench-report").join(report)
+}
+
+/// A report binary's whole [`Part::Apart`] run: measures [`apart_section`]
+/// on `files`, writes it to [`apart_section_path`] and names the path, or
+/// prints the error and fails.
+#[must_use]
+pub fn write_apart_section(
+    root: &Path,
+    report: &str,
     files: &[(String, Vec<u8>)],
-    measurements: &[FileMeasurement],
     mothergod_program: &Path,
-) -> Result<String, String> {
-    let others = LEVELS
-        .into_iter()
-        .filter(|&level| level != Level::Best)
-        .map(|level| {
-            let label = level_label(level);
-            println!("measuring {label} on {} file(s)...", files.len());
-            let points = files
-                .iter()
-                .map(|(name, data)| {
-                    measure_mothergod(mothergod_program, level, data)
-                        .map(|point| (data.len(), point))
-                        .map_err(|err| format!("{label} failed on {name}: {err}"))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(Row::aggregate(&label, &points))
+) -> ExitCode {
+    let path = apart_section_path(root, report);
+    let written = apart_section(files, mothergod_program).and_then(|section| {
+        path.parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(&path, section))
+            .map_err(|err| format!("failed to write {}: {err}", path.display()))
+    });
+    match written {
+        Ok(()) => {
+            println!("wrote the apart section to {}", path.display());
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `level`'s row over `files`, each file timed in a child of
+/// `mothergod_program` as [`measure_all`] times the default (issue #1708).
+fn level_row(
+    files: &[(String, Vec<u8>)],
+    mothergod_program: &Path,
+    level: Level,
+) -> Result<Row, String> {
+    let label = level_label(level);
+    println!("measuring {label} on {} file(s)...", files.len());
+    let points = files
+        .iter()
+        .map(|(name, data)| {
+            measure_mothergod(mothergod_program, level, data)
+                .map(|point| (data.len(), point))
+                .map_err(|err| format!("{label} failed on {name}: {err}"))
         })
-        .collect::<Result<Vec<_>, String>>()?;
-    let field = competitors()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Row::aggregate(&label, &points))
+}
+
+/// A row for every level of gzip, zstd and xz over `files`.
+fn field_rows(files: &[(String, Vec<u8>)]) -> Result<Vec<Row>, String> {
+    competitors()
         .iter()
         .map(|competitor| {
             let label = competitor.label();
@@ -329,19 +394,91 @@ pub fn frontier_section(
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(Row::aggregate(&label, &points))
         })
+        .collect()
+}
+
+/// The frontier sections of a finals report (issue #1340): every level of
+/// gzip, zstd and xz measured on `files`, one process at a time, beside the
+/// mothergod row `measurements` already holds and a row for each other
+/// level but [`APART`], timed in a child of `mothergod_program` as
+/// [`measure_all`] times the default (issue #1708). With `apart` set, the
+/// [`APART`] section follows, its level timed here and read against the
+/// same competitor rows, so the whole report costs one matrix.
+///
+/// Serial by design, the rule [`measure_all`] states for mothergod: a
+/// wall-clock taken beside another measurement is not a rate. It is the
+/// longest part of a report run, one `field::measure` per level per file,
+/// and prints a line per level because nothing else shows it alive.
+///
+/// # Errors
+///
+/// Returns an error naming the level and file if any `field::measure` or
+/// `field::measure_mothergod` fails.
+pub fn frontier_section(
+    files: &[(String, Vec<u8>)],
+    measurements: &[FileMeasurement],
+    mothergod_program: &Path,
+    apart: bool,
+) -> Result<String, String> {
+    let others = LEVELS
+        .into_iter()
+        .filter(|&level| level != Level::Best && level != APART)
+        .map(|level| level_row(files, mothergod_program, level))
         .collect::<Result<Vec<_>, String>>()?;
-    Ok(format_section(
-        &Row::mothergod(measurements),
-        &others,
+    let field = field_rows(files)?;
+    let mut section = format_section(&Row::mothergod(measurements), &others, &field);
+    if apart {
+        let row = level_row(files, mothergod_program, APART)?;
+        section.push_str(&format_level_section(&row, &field, Machine::NamedAbove));
+    }
+    Ok(section)
+}
+
+/// The [`APART`] section alone (issue #1926): the level and every level of
+/// gzip, zstd and xz timed on `files` on this machine, which the section
+/// names with [`machine_info`], because the report it is appended to was
+/// timed on another runner.
+///
+/// # Errors
+///
+/// As [`frontier_section`].
+pub fn apart_section(
+    files: &[(String, Vec<u8>)],
+    mothergod_program: &Path,
+) -> Result<String, String> {
+    let row = level_row(files, mothergod_program, APART)?;
+    let field = field_rows(files)?;
+    Ok(format_level_section(
+        &row,
         &field,
+        Machine::Own(&machine_info()),
     ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        GZIP_ARGS, compressed_len, generated_at, machine_info, run_to_stdout, tool_version,
+        GZIP_ARGS, Part, compressed_len, generated_at, machine_info, run_to_stdout, tool_version,
     };
+
+    #[test]
+    fn part_reads_no_flag_as_whole_and_each_flag_alone() {
+        let args = |list: &[&str]| list.iter().map(|&a| a.to_string()).collect::<Vec<_>>();
+        assert_eq!(Part::from_args(&args(&[])), Ok(Part::Whole));
+        assert_eq!(
+            Part::from_args(&args(&["--except-apart"])),
+            Ok(Part::ExceptApart)
+        );
+        assert_eq!(Part::from_args(&args(&["--apart-only"])), Ok(Part::Apart));
+        for bad in [
+            &["--apart"][..],
+            &["--except-apart", "--apart-only"],
+            &["--apart-only", "--apart-only"],
+            &["silesia"],
+        ] {
+            assert!(Part::from_args(&args(bad)).is_err(), "{bad:?}");
+        }
+    }
 
     /// Repeated enough (200x) that every reference compressor's fixed
     /// container overhead (gzip's ~18-byte header/trailer, xz's larger

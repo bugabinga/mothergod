@@ -212,12 +212,15 @@ REPORTS = (("Canterbury", "canterbury.md"), ("Silesia", "silesia.md"))
 
 
 def frontier_section(filename):
-    """The text after a finals report's `## Frontier:` heading."""
+    """The text after a finals report's `## Frontier:` heading, up to the
+    next heading: a level timed apart has its own section after it, with
+    its own competitor rows from another runner (#1926), and a row read from
+    there would place the default against another machine's rates."""
     text = (ROOT / "docs" / "benchmarks" / filename).read_text(encoding="utf-8")
     _, found, section = text.partition("\n## Frontier:")
     if not found:
         raise ValueError(f"no frontier section in {filename}")
-    return section
+    return section.split("\n## ", 1)[0]
 
 
 def last_moved(source, line_start):
