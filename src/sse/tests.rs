@@ -263,7 +263,7 @@ fn logit_sse_update_advances_the_lower_and_upper_bin_separately() {
          got lower_index={lower_index}, fraction={fraction}"
     );
 
-    let bound = stretch_bound();
+    let bound = *STRETCH_BOUND;
     #[allow(
         clippy::cast_precision_loss,
         reason = "lower_index < BINS - 1 (32): exact in f64"
@@ -384,4 +384,78 @@ fn logit_sse_bins_concentrate_resolution_near_the_extremes() {
         "the same 0.02 probability step should cross more bin-space near 1.0 \
          (gap={ext_gap}) than near 0.5 (gap={mid_gap})"
     );
+}
+
+/// Drives `fused` through [`Table::refine_then_update`] and `split` through
+/// [`Table::refine`] then [`Table::update`] on the same inputs, asserting
+/// the refined probabilities and the final bins are bit-identical: the
+/// walks' switch to the fused step must not move a coded bit (#1928).
+fn assert_refine_then_update_matches_the_two_calls<S: Spacing>() {
+    const CONTEXTS: usize = 3;
+    let mut fused = Table::<S>::new(CONTEXTS);
+    let mut split = Table::<S>::new(CONTEXTS);
+    // Interior points from a fixed LCG, plus the clamped edges and the
+    // values past them a caller's rounding can produce.
+    let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+    let edges = [0.0, 1.0, -0.25, 1.25, MIN_PROBABILITY, MAX_PROBABILITY, 0.5];
+    for step in 0..4096_usize {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "a 53-bit integer is exact in f64"
+        )]
+        let interior = (state >> 11) as f64 / (1u64 << 53) as f64;
+        let p = edges.get(step % 64).copied().unwrap_or(interior);
+        let context = step % CONTEXTS;
+        let outcome_of = |refined: f64| refined < interior;
+
+        let mut seen = f64::NAN;
+        let fused_outcome = fused.refine_then_update(context, p, |refined| {
+            seen = refined;
+            outcome_of(refined)
+        });
+        let refined = split.refine(context, p);
+        let split_outcome = outcome_of(refined);
+        split.update(context, p, split_outcome);
+
+        assert_eq!(seen.to_bits(), refined.to_bits(), "step {step}, p={p}");
+        assert_eq!(fused_outcome, split_outcome, "step {step}, p={p}");
+    }
+    let bits = |table: &Table<S>| table.bins.iter().map(|b| b.to_bits()).collect::<Vec<_>>();
+    assert_eq!(bits(&fused), bits(&split), "{} bins diverged", S::NAME);
+}
+
+#[test]
+fn sse_refine_then_update_is_refine_then_update_bit_for_bit() {
+    assert_refine_then_update_matches_the_two_calls::<Linear>();
+}
+
+#[test]
+fn logit_sse_refine_then_update_is_refine_then_update_bit_for_bit() {
+    assert_refine_then_update_matches_the_two_calls::<Logit>();
+}
+
+#[test]
+fn split_position_truncation_is_floor_over_the_whole_bin_range() {
+    // Every 1/4096 of a bin across [0, 32], the span both spacings clamp
+    // `scaled` into, plus each bin edge's two neighbors in f64.
+    let grid = (0..=32 * 4096).map(|i| f64::from(i) / 4096.0);
+    let neighbors = (0..=32).flat_map(|edge| {
+        let edge = f64::from(edge);
+        [edge.next_down(), edge, edge.next_up()]
+    });
+    for scaled in grid
+        .chain(neighbors)
+        .filter(|s| (0.0..=LAST_BIN).contains(s))
+    {
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "scaled is in [0.0, 32.0]: the reference the cast replaced"
+        )]
+        let floor = (scaled.floor() as usize).min(BINS - 2);
+        assert_eq!(split_position(scaled).0, floor, "scaled={scaled}");
+    }
 }

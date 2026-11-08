@@ -132,10 +132,7 @@ fn walk_sse(cum: &[u64], sse: &mut Sse, mut code_bit: impl FnMut(usize, f64) -> 
     walk_nodes(|depth, prefix, lo, mid, hi| {
         let raw_p = upper_half_probability(cum, lo, hi);
         let context = sse_context(depth, prefix);
-        let refined_p = sse.refine(context, raw_p);
-        let bit = code_bit(mid, refined_p);
-        sse.update(context, raw_p, bit);
-        bit
+        sse.refine_then_update(context, raw_p, |refined_p| code_bit(mid, refined_p))
     })
 }
 

@@ -68,7 +68,7 @@ release.
   model stands after the three `-4` entries under Changed, that is 0.332
   bits/byte smaller on average over `bench/`'s 11 synthetic training cases
   and 0.31 on its two held-out ones, never larger. The price is a slower
-  encode and a far slower decode of the frames it changes: 17.4x to 17.5x
+  encode and a far slower decode of the frames it changes: 18.9x to 19.8x
   the `-3` decode time on those training cases. On real files `-4` is 23.0%
   smaller than `-3` on the Silesia corpus at about 6x its encode time and
   40x its decode time, and 22.2% smaller on Canterbury at about 9x and 50x. A
@@ -238,6 +238,9 @@ release.
 
 ### Changed
 
+- perf: decoding a `-3` frame takes 7% to 10% less time on `bench/`'s 11
+  synthetic training cases, and every level writes the bytes it wrote
+  (#PRNUM).
 - Benchmarks: each finals report times `-4` in a frontier section of its
   own, beside its own run of every gzip, zstd and xz level, so the default
   level's rows and its speed shares can be measured without waiting on the

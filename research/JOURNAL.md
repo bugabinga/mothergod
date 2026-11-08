@@ -10513,3 +10513,33 @@ record.
   4 MiB `git log -p` slice of S2-A142, which the bullet drops for the
   Silesia report rows; any runner but this one. `research/progress.jsonl`
   it306.
+- S2-A156 | ACCEPTED | Issue #1928's first row, the SSE share of S2-R43's
+  bit-identical cuts: each literal node locates its calibration bins once,
+  against a stretch bound evaluated once per process. Hypothesis:
+  `Logit::position` ran two `ln` series per call, `stretch_bound()` and
+  `stretch(p)`, and `refine` and `update` each located the same `(context,
+  p)`, so a node paid four where one does; cutting three, plus `floor`'s
+  out-of-line call, lowers the default level's decode cost on the gate
+  cases by a share near S2-A154's `locate` row. | Mechanism:
+  `sse::Table::refine_then_update` locates once, reads, hands the refined
+  probability to the caller's coder, and writes at the same pair;
+  `Literal::walk_logit_sse` and `bittree::walk_sse` call it. The bound is
+  a `LazyLock`; `split_position` truncates instead of calling `floor`,
+  equal because both spacings clamp `scaled` into `[0, 32]` first. `-4`'s
+  five tables still locate per call and gain the bound only. Bit-identity:
+  `tests/golden.rs` unchanged and passing, and two unit tests hold the
+  fused step to the two calls bit for bit under both spacings. |
+  Measured, release build, AMD EPYC 9V45 runner, one process each, three
+  reads: `cm_path::decode_costs_vs_hybrid` hybrid **103.5, 103.7, 103.4**
+  calibration steps per byte against main's (`45e68eb`) 113.8, 114.9,
+  111.5, so 7% to 10% less; the path 1958.6, 1968.7, 2043.1 against
+  2081.8, 2079.0, 1987.4, inside its own spread; so `-4`'s decode reads
+  18.92x, 18.98x, 19.76x the hybrid's against 18.29x, 18.09x, 17.82x.
+  `baseline_gate -- speed` separately: 101.85, 103.99 against 117.20,
+  111.66, 111.38. | Verdict: **accepted** (`kind: "patch"`, null
+  deltas, bytes unchanged).
+  | **Not measured:** `decode_profile` on Silesia, which
+  needs the runner's sudo; encode, which runs the same walk; the 840 s
+  hostile `-3` cap reading the changelog cites; any CPU but this one.
+  #1928's second row, the per-byte prefix table, is its own slice.
+  `research/progress.jsonl` it307.

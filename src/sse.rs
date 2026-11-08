@@ -20,6 +20,7 @@
 //! [`crate::literal::SurpriseLogisticMix`] ([`LogitSse`]).
 
 use std::marker::PhantomData;
+use std::sync::LazyLock;
 
 use crate::logistic::{squash, stretch};
 
@@ -68,12 +69,16 @@ pub trait Spacing {
 /// lower bin index and the fraction past it. The last bin pairs with its
 /// predecessor (fraction `1.0`) so `lower + 1` is always a valid index.
 fn split_position(scaled: f64) -> (usize, f64) {
+    // The truncating cast is `floor` for every `scaled` either spacing
+    // produces: both clamp first, so `scaled` is never below `0.0`, and the
+    // cast saturates a NaN or a negative to 0, where `floor` would agree
+    // anyway. Without `floor`, a baseline x86-64 build calls no libm.
     #[allow(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
-        reason = "scaled is in [0.0, 32.0], so floor(scaled) always fits usize"
+        reason = "scaled is in [0.0, 32.0], so its integer part always fits usize"
     )]
-    let lower = (scaled.floor() as usize).min(BINS - 2);
+    let lower = (scaled as usize).min(BINS - 2);
     #[allow(
         clippy::cast_precision_loss,
         reason = "lower < BINS - 1 (32): exact in f64"
@@ -108,12 +113,12 @@ impl Spacing for Linear {
 
 /// [`stretch`]'s value at [`MAX_PROBABILITY`], the positive half of the
 /// bounded logit-domain range [`Logit`] spaces its bins across (`stretch`
-/// is odd, so [`MIN_PROBABILITY`]'s value is its negation). Recomputed
-/// rather than a `const`: [`stretch`] calls [`crate::logistic::ln`], not
-/// itself `const fn`.
-fn stretch_bound() -> f64 {
-    stretch(MAX_PROBABILITY)
-}
+/// is odd, so [`MIN_PROBABILITY`]'s value is its negation). Evaluated once
+/// per process rather than a `const`: [`stretch`] calls
+/// [`crate::logistic::ln`], not itself `const fn`, and once rather than
+/// per [`Logit::position`] call because that `ln` series was a share of
+/// every literal node's decode (issue #1928).
+static STRETCH_BOUND: LazyLock<f64> = LazyLock::new(|| stretch(MAX_PROBABILITY));
 
 /// Evenly spaced bins in [`stretch`]-space, concentrating resolution near
 /// 0 and 1.
@@ -128,7 +133,7 @@ impl Spacing for Logit {
     /// `stretch` never sees an input outside the domain its own bound was
     /// computed from.
     fn position(p: f64) -> (usize, f64) {
-        let bound = stretch_bound();
+        let bound = *STRETCH_BOUND;
         let s = stretch(p.clamp(MIN_PROBABILITY, MAX_PROBABILITY)).clamp(-bound, bound);
         split_position((s + bound) / (2.0 * bound) * LAST_BIN)
     }
@@ -137,7 +142,7 @@ impl Spacing for Logit {
     /// point, so a fresh table is still (approximately) a no-op under this
     /// spacing.
     fn identity() -> [f64; BINS] {
-        let bound = stretch_bound();
+        let bound = *STRETCH_BOUND;
         std::array::from_fn(|bin| squash(-bound + bin_fraction(bin) * (2.0 * bound)))
     }
 }
@@ -211,9 +216,7 @@ impl<S: Spacing> Table<S> {
     #[must_use]
     pub fn refine(&self, context: usize, p: f64) -> f64 {
         let (lower, fraction) = self.locate(context, p);
-        self.bins[lower]
-            .mul_add(1.0 - fraction, self.bins[lower + 1] * fraction)
-            .clamp(MIN_PROBABILITY, MAX_PROBABILITY)
+        self.interpolate(lower, fraction)
     }
 
     /// Adapts `context`'s two bins nearest `p` toward the observed
@@ -229,6 +232,41 @@ impl<S: Spacing> Table<S> {
     /// Panics as [`Self::refine`] does.
     pub fn update(&mut self, context: usize, p: f64, outcome: bool) {
         let (lower, fraction) = self.locate(context, p);
+        self.learn(lower, fraction, outcome);
+    }
+
+    /// [`Self::refine`] at `(context, p)`, `decide` on the refined
+    /// probability, then [`Self::update`] at the same `(context, p)` on the
+    /// outcome `decide` returns, which this returns: a binary walk's node
+    /// step, bit-identical to the two calls in sequence because nothing
+    /// writes the bins between the read and the write. `p`'s bins are
+    /// located once instead of twice, which [`Logit`] pays for in a
+    /// [`stretch`] per locate (issue #1928).
+    ///
+    /// # Panics
+    ///
+    /// Panics as [`Self::refine`] does.
+    pub fn refine_then_update(
+        &mut self,
+        context: usize,
+        p: f64,
+        decide: impl FnOnce(f64) -> bool,
+    ) -> bool {
+        let (lower, fraction) = self.locate(context, p);
+        let outcome = decide(self.interpolate(lower, fraction));
+        self.learn(lower, fraction, outcome);
+        outcome
+    }
+
+    /// The read half of [`Self::refine`], at a [`Self::locate`]d bin pair.
+    fn interpolate(&self, lower: usize, fraction: f64) -> f64 {
+        self.bins[lower]
+            .mul_add(1.0 - fraction, self.bins[lower + 1] * fraction)
+            .clamp(MIN_PROBABILITY, MAX_PROBABILITY)
+    }
+
+    /// The write half of [`Self::update`], at a [`Self::locate`]d bin pair.
+    fn learn(&mut self, lower: usize, fraction: f64, outcome: bool) {
         let target = if outcome { 1.0 } else { 0.0 };
         self.bins[lower] += LEARNING_RATE * (1.0 - fraction) * (target - self.bins[lower]);
         self.bins[lower + 1] += LEARNING_RATE * fraction * (target - self.bins[lower + 1]);
