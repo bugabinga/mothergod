@@ -340,10 +340,8 @@ pub mod bcj {
         /// A fresh undo state with [`INSTRUCTION_LEN`] bytes of pending
         /// capacity (fallible: module docs).
         pub(crate) fn try_new() -> Result<Self, std::collections::TryReserveError> {
-            let mut pending = Vec::new();
-            pending.try_reserve_exact(INSTRUCTION_LEN)?;
             Ok(Self {
-                pending,
+                pending: crate::try_with_capacity(INSTRUCTION_LEN)?,
                 position: 0,
             })
         }
@@ -532,8 +530,7 @@ pub mod base64_unwrap {
 
     /// Fallible [`decode`] (module docs of [`crate::filters`]).
     pub(crate) fn try_decode(data: &[u8]) -> Result<Vec<u8>, std::collections::TryReserveError> {
-        let mut out = Vec::new();
-        out.try_reserve_exact(padded_capacity(data))?;
+        let mut out = crate::try_with_capacity(padded_capacity(data))?;
         encode_into(data, &mut out);
         Ok(out)
     }
