@@ -11,6 +11,7 @@ import { test } from "node:test";
 
 const script = join(new URL(".", import.meta.url).pathname, "post-verdict");
 const ID = "c".repeat(64);
+const BASE = "d".repeat(64);
 
 function run(
   args,
@@ -53,6 +54,7 @@ console.log("https://github.com/o/r/pull/1#issuecomment-9");
       GH_TOKEN: "app-token",
       GH_WORKFLOW_TOKEN: "workflow-token",
       DIFF_ID: ID,
+      BASE_ID: BASE,
       GH_RETRY_DELAY: "0",
       ...env,
     },
@@ -145,6 +147,28 @@ test("pass flips the pair to agent-approved and stamps pass", () => {
     "changes-requested",
   ]);
   assert.match(calls[1].argv[4], new RegExp(`<!-- verdict pass ${ID} -->`));
+});
+
+test("fail --waits-on-merge stamps the base-typed id, so a refresh past the awaited merge reviews (#1918)", () => {
+  const { status, calls } = run(["950", "fail", "--waits-on-merge"], { body: "one [must]: wait for #1906" });
+  assert.equal(status, 0);
+  assert.equal(calls.length, 3);
+  assert.match(calls[2].argv[4], new RegExp(`<!-- verdict fail ${BASE} -->`));
+  assert.doesNotMatch(calls[2].argv[4], new RegExp(ID));
+});
+
+test("pass --waits-on-merge is a usage error before any write: a pass waits on nothing", () => {
+  const { status, stderr, calls } = run(["950", "pass", "--waits-on-merge"]);
+  assert.equal(status, 1);
+  assert.equal(calls.length, 0);
+  assert.match(stderr, /waits on nothing/);
+});
+
+test("fail --waits-on-merge with an empty BASE_ID posts unstamped and names the variable", () => {
+  const { status, stderr, calls } = run(["950", "fail", "--waits-on-merge"], { env: { BASE_ID: "" } });
+  assert.equal(status, 0);
+  assert.doesNotMatch(calls[2].argv[4], /<!-- verdict/);
+  assert.match(stderr, /BASE_ID is empty, posting unstamped/);
 });
 
 test("an empty DIFF_ID posts unstamped and says so, never withholds the verdict", () => {
