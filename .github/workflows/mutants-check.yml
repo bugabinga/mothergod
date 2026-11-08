@@ -66,9 +66,7 @@
 # past theirs in two days (#676, #677, #690). The last step, `mutants-debt`,
 # files a merged PR's survivors as one issue and leaves an open PR's red on
 # the diff. Its docstring holds the incident and the contract; nothing here
-# restates either. Forks are skipped by the `if:` because their token
-# cannot write issues, and a fork PR's red is the reviewer's to read before
-# merging, same as before.
+# restates either.
 name: mutants-check
 
 on:
@@ -195,10 +193,13 @@ jobs:
       # mutate step skips the verdict but still leaves a partial missed.txt
       # (#690's 50 survivors were exactly that) and a listing longer than
       # its outcomes (#947's undecided set), and a PR merged during the
-      # run is the case this step exists for. Same-repo PRs only: a fork's
-      # token cannot file, and its red is read on the open thread.
+      # run is the case this step exists for. Every PR, forks included
+      # (#1965): the never-ran `::notice` this step prints is a cut run's
+      # only record, and an open PR needs just the read token. A fork's
+      # token cannot file, so a fork PR merged mid-run reds here with
+      # "filing failed"; the monthly sweep (#455) is its backstop.
       - name: File the survivors of a merged PR
-        if: always() && github.event.pull_request.head.repo.full_name == github.repository
+        if: always()
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
