@@ -12,7 +12,7 @@ secrets. Has absolute veto: may close any PR, revert any commit, pause the
 system (open an issue labeled `agents-paused`), or change any process. Handles
 everything agents cannot: repository settings, secrets, account-level actions,
 publishing to crates.io, code-of-conduct enforcement, and security-report
-triage. The operator is *not* required to review routine changes — the system
+triage. The operator is *not* required to review routine changes: the system
 is fully autonomous by design (ADR-0003).
 
 **Agents (Claude, via GitHub Actions).**
@@ -20,8 +20,8 @@ is fully autonomous by design (ADR-0003).
   (ADR-0005), cadence in its cron (ADR-0015). Fixes the `agent-system`
   realm itself, so the maintainer's queue carries only `product`.
   Unblocks stalled
-  work, prunes, reprioritizes the roadmap, and evolves everything non-code —
-  including the other agents' workflows and prompts — without approval
+  work, prunes, reprioritizes the roadmap, and evolves everything non-code,
+  including the other agents' workflows and prompts, without approval
   ceremony, but always with a written record and a digest to the operator.
   Steers every non-code aspect of the project as an open-source product;
   since ADR-0040 the *making* of the human-facing surface (site, README
@@ -29,7 +29,7 @@ is fully autonomous by design (ADR-0003).
   herald's, and the BDFL directs it through charter issues and
   retrospect judgment. Sole exception to "never merge
   your own PR" (non-code PRs, green CI only).
-- *Herald*, twice daily: makes the human-facing surface (ADR-0040) —
+- *Herald*, twice daily: makes the human-facing surface (ADR-0040):
   mothergod.dev, README reader experience, release-notes voice,
   positioning, `marketing/JOURNAL.md` as its institutional memory.
   Weekly, as `herald-survey-due` realizes it, it measures USERS
@@ -55,7 +55,7 @@ is fully autonomous by design (ADR-0003).
   never removes `blocked-on-human`. The label set and the ops-log
   issue are created state, not a standing duty: ADR-0044's bootstrap
   never found either missing and is retired (ADR-0051).
-- *Reviewer* — adversarial review of every PR; verifies claims by running
+- *Reviewer*: adversarial review of every PR; verifies claims by running
   them; merges when CI is green and the review passes. Never reviews work it
   authored in the same run.
 - *Deslopper*, three times daily: removes slop from `src/` without changing
@@ -65,7 +65,7 @@ is fully autonomous by design (ADR-0003).
 issues, which the curator triages daily.)
 
 Agent behavior is governed by `CLAUDE.md` (the contract) and the workflow
-prompts in `.github/workflows/` — both are ordinary versioned files. The
+prompts in `.github/workflows/`: both are ordinary versioned files. The
 BDFL evolves them directly; other agents propose changes by PR, which the
 reviewer treats as high-risk (see below).
 
@@ -279,13 +279,13 @@ naming it, label `blocked-on-human`, move on.
 
 A PR that conflicts with `main` at the moment it is opened is a third
 signature, and a sharper one: GitHub never builds a merge ref for it,
-so `ci` and `agent-review` do not run — not fail, not skip, never
+so `ci` and `agent-review` do not run: not fail, not skip, never
 fire (first hit PR #196, issue #200). It cannot carry
 `agent-approved`, since no reviewer ever touched it, so scanning by
 that label misses it entirely; `gh run list --branch <branch>` comes
 back empty, indistinguishable from a branch nobody pushed to. Sweep
 ALL open PRs, not just labeled ones, for zero check runs on the head
-SHA older than a few minutes — that is the tell. `settle-push` on such
+SHA older than a few minutes; that is the tell. `settle-push` on such
 a PR names the class and prints this rescue instead of reporting
 missing runs (issue #338). Rescue is the same mechanical merge as the
 `dirty` case above, just reached by a different detection path, after
@@ -534,7 +534,7 @@ table (`infra/sessions/schema.sql`): `sessions sql` over it, joined to
 the query the deep survey's context audit opens with.
 
 So: grant Bash unrestricted to any agent that already holds `Edit`/`Write`.
-Withhold a tool only where withholding states a real role boundary — the
+Withhold a tool only where withholding states a real role boundary: the
 reviewer and the curator get no `Edit`/`Write` because they judge and do
 not modify, and that denial is the design working.
 
@@ -569,7 +569,7 @@ make and ended asking permission of nobody (#695).
 
 Human contributions are welcome and go through the same pipeline: file issues,
 open PRs; the curator triages questions daily. The reviewer agent reviews human
-PRs with the same rules (and extra courtesy — see CONTRIBUTING.md). Appeals
+PRs with the same rules (and extra courtesy, see CONTRIBUTING.md). Appeals
 against any agent decision: open an issue and tag @bugabinga; the operator's
 call is final.
 
