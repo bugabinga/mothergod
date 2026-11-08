@@ -131,10 +131,9 @@ of xz -9e's in the same report pass, on both finals. xz -9e is the
 reference because it is the slowest level the field ships; half, because
 a user weighing the field's slowest level against a smaller output accepts
 a factor of two and not an order of magnitude. The bar is the operator's
-to move, and its reading lives on /status and in the frontier sections of
-`docs/benchmarks/`, never here (ADR-0048): on the 2026-11-06 Silesia pass
-the default sits well under it on both axes, decode further than encode,
-and xz -4 is smaller and faster both ways.
+to move, and its reading is the two share lines each finals report's
+frontier section ends with, and /status once #1921 lands, never here
+(ADR-0048).
 
 First because 0.1 waits on it, and because the trigger M5 set for decode
 speed, a user's ask, fired with the operator's. The evidence fixes the
@@ -152,7 +151,8 @@ into, never below.
 Items, in [milestone M9](https://github.com/bugabinga/mothergod/milestone/5),
 in order: the share printed by the finals reports and rendered on /status
 against the bar (#1921), measurement first for the reason M5 gave; the
-charter (#1922), three questions, the decode profile S2-R36 left
+pass that prints it split in two jobs so the `-4` row cannot cost it the
+cap (#1926); the charter (#1922), three questions, the decode profile S2-R36 left
 unmeasured (S2-R43), the literal coder class that holds rung 1 at the
 bar's decode rate, priced beside the token coder, and the encode tier at
 the new floor; then the wiring slice, with its ADR
