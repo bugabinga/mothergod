@@ -75,7 +75,8 @@ jobs:
     # 326, past the 300 this line carried, with nothing published. 355 is
     # the room under the hosted runner's 360-minute job limit; a pass
     # that needs more is a measurement to cut (#1926), never a cap to
-    # raise.
+    # raise. #1926 cut it: `-4` is timed in the `apart` job below, on its
+    # own runner, so this job's cost is the rest.
     timeout-minutes: 355
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -87,17 +88,70 @@ jobs:
       - run: cargo run -p mothergod-bench --release --bin baseline_gate -- write
       - run: cargo run -p mothergod-bench --release --bin render_baseline_graph
       - run: cargo x fmt -- docs/benchmarks/baseline.svg
-      - run: cargo run -p mothergod-bench --release --features corpus-fetch --bin finals_report
-      - run: cargo run -p mothergod-bench --release --features corpus-fetch --bin silesia_report
+      - run: cargo run -p mothergod-bench --release --features corpus-fetch --bin finals_report -- --except-apart
+      - run: cargo run -p mothergod-bench --release --features corpus-fetch --bin silesia_report -- --except-apart
       - run: git --no-pager diff --stat >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: bench-report
+          name: bench-report-except-apart
           path: |
             bench/baseline.json
             docs/benchmarks/baseline.md
             docs/benchmarks/baseline.svg
             docs/benchmarks/canterbury.md
             docs/benchmarks/silesia.md
+          retention-days: 1
+          if-no-files-found: error
+
+  # The `-4` section of both finals reports, with its own competitor
+  # matrix and machine line (`reference::Part::Apart`, #1926): the pass's
+  # longest row, timed beside `regenerate` instead of after it, so neither
+  # job waits on the other's clock.
+  apart:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-ci
+        with:
+          checks: setup
+      - run: cargo run -p mothergod-bench --release --features corpus-fetch --bin finals_report -- --apart-only
+      - run: cargo run -p mothergod-bench --release --features corpus-fetch --bin silesia_report -- --apart-only
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: bench-report-apart
+          path: |
+            target/bench-report/canterbury.md
+            target/bench-report/silesia.md
+          retention-days: 1
+          if-no-files-found: error
+
+  # Appends each `-4` section to its report and uploads the one artifact
+  # `.github/scripts/bench-report` downloads, under the name it reads.
+  assemble:
+    needs: [regenerate, apart]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bench-report-except-apart
+          path: report
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bench-report-apart
+          path: apart
+      - run: |
+          cat apart/canterbury.md >> report/docs/benchmarks/canterbury.md
+          cat apart/silesia.md >> report/docs/benchmarks/silesia.md
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: bench-report
+          path: |
+            report/bench/baseline.json
+            report/docs/benchmarks/baseline.md
+            report/docs/benchmarks/baseline.svg
+            report/docs/benchmarks/canterbury.md
+            report/docs/benchmarks/silesia.md
           retention-days: 14
           if-no-files-found: error
