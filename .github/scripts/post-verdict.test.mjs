@@ -199,6 +199,32 @@ test("an empty body is refused before the label moves", () => {
   assert.match(stderr, /empty body/);
 });
 
+// The reviewer's first post on #1988 (2026-11-09) named the head bare;
+// gh-comment refused it after the pair had flipped, so `agent-approved`
+// stood with no items behind it until a second post.
+test("a bare hash in the body is refused before the label moves (A2)", () => {
+  const { status, stderr, calls } = run(["950", "pass"], {
+    body: "No [must] found on e81cf345108c, the tests pass.",
+    env: { CLAUDECODE: "1" },
+  });
+  assert.equal(status, 1);
+  assert.equal(calls.length, 0);
+  assert.match(stderr, /bare commit hash e81cf345108c/);
+  assert.match(stderr, /nothing moved/);
+});
+
+test("a cited hash in the body passes the A2 check and the verdict posts", () => {
+  const { status, stderr, calls } = run(["950", "pass"], {
+    body: "No [must] found; e81cf34 (\"ci: actionlint pinned\") is the head, pin `e81cf345108c`.",
+    env: { CLAUDECODE: "1" },
+  });
+  assert.equal(status, 0, stderr);
+  assert.deepEqual(
+    calls.map((c) => c.argv.slice(0, 2)),
+    [["pr", "edit"], ["issue", "comment"]],
+  );
+});
+
 // Three reviewer runs on 2026-10-26 each retried a verdict by hand after a
 // GitHub 5xx; the flip is idempotent, so gh_retry.once tries it again at once.
 test("a 5xx on the label edit gets one more try before the comment posts", () => {
