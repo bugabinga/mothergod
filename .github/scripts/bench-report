@@ -100,8 +100,10 @@ tell fresh reports from a detector that stopped reading.
 
 Usage: bench-report              print the state and the next action
        bench-report --publish    in state publish: download the artifact,
-                                 write its files into the tree and stamp the
-                                 figures the surfaces copy from them
+                                 write its files into the tree, say which
+                                 column classes moved and which src commits
+                                 since the generator can have moved them,
+                                 and stamp the figures the surfaces copy
 
 Exits 0 whichever state it prints; a state is a duty, not an error.
 `--publish` exits 1 when the state is not publish, the download fails or a
@@ -141,6 +143,19 @@ FULL_SHA = 40
 # is tests/claims.rs, the one parser of those sentences (#1486).
 SURFACES = ("README.md", "site/index.html", "CHANGELOG.md")
 STAMP = ("cargo", "test", "--test", "claims")
+# The classes a publish PR's body says moved, by the column names the
+# generators print (#1418): `regret` is a difference of two b/B columns, so
+# it rides with ratio. `bench/baseline.json` carries no class of its own,
+# because baseline.md prints its every figure as `bits/byte`.
+CLASSES = (
+    ("ratio", ("b/B", "bits/byte", "regret")),
+    ("throughput", ("MB/s",)),
+    ("peak memory", ("peak",)),
+)
+ORDER = tuple(name for name, _ in CLASSES) + ("date", "rows")
+DATE = re.compile(r"^As of (\S+)\.", re.M)
+# Where a commit can move a figure: the crate, and the harness that times it.
+CAUSES = ("src", "bench/src")
 # Twelve characters, because seven resolved once as no object (the docstring
 # of `commit`); the regex admits seven for the publish subjects already on
 # main that carry them.
@@ -386,8 +401,115 @@ def render(facts, error, out=sys.stdout):
     return state
 
 
-def publish(repo, run_id, root, out=sys.stdout):
-    """Download the pass's artifact, write FILES into the tree under `root`, stamp their figures. Returns the exit code.
+def column_class(header):
+    """The class a table column's figures belong to, or None for a key column (file, level, case, bytes)."""
+    for name, needles in CLASSES:
+        if any(needle in header for needle in needles):
+            return name
+    return None
+
+
+def cells(line):
+    """A markdown table row's cells, bold and code marks stripped, so `**1.52**` and `1.52` compare equal."""
+    return [cell.strip().strip("*").strip("`").strip() for cell in line.strip().strip("|").split("|")]
+
+
+def figures(text):
+    """Every classed figure in a report, as {class: {(heading, row key, column): value}}, plus the `As of` stamp under "date".
+
+    A table is keyed by the heading above it and a row by its first cell,
+    because silesia.md prints `xz -9e` once per frontier, with different
+    rates from different runners.
+    """
+    found = {}
+    heading = ""
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("#"):
+            heading = line.strip("# ").strip()
+        elif line.startswith("|") and i + 1 < len(lines) and re.match(r"^\|\s*-+", lines[i + 1]):
+            header = cells(line)
+            i += 2
+            while i < len(lines) and lines[i].startswith("|"):
+                row = cells(lines[i])
+                for column, value in zip(header[1:], row[1:]):
+                    name = column_class(column)
+                    if name:
+                        found.setdefault(name, {})[(heading, row[0], column)] = value
+                i += 1
+            continue
+        i += 1
+    stamp = DATE.search(text)
+    if stamp:
+        found["date"] = {("", "As of", ""): stamp.group(1)}
+    return found
+
+
+def moved(before, after):
+    """The classes whose figures differ between two `figures` of one report; "rows" when a figure exists on one side only."""
+    classes = set()
+    for name in set(before).union(after):
+        old, new = before.get(name, {}), after.get(name, {})
+        if set(old) != set(new):
+            classes.add("rows")
+        if any(old[key] != new[key] for key in set(old).intersection(new)):
+            classes.add(name)
+    return classes
+
+
+def column_lines(before, root):
+    """The two lines a publish body copies (#1418): which classes moved, in which reports, and which stayed.
+
+    `before` is each markdown report's text as it stood before the copy;
+    the written one is read from `root`. The svg and json carry no class
+    of their own (CLASSES).
+    """
+    moved_in, seen = {}, set()
+    for rel, old_text in before.items():
+        old, new = figures(old_text), figures((root / rel).read_text())
+        seen.update(old, new)
+        for name in moved(old, new):
+            moved_in.setdefault(name, []).append(Path(rel).name)
+    changed = ", ".join(f"{name} ({', '.join(moved_in[name])})" for name in ORDER if name in moved_in) or "none"
+    unchanged = ", ".join(name for name in ORDER if name in seen and name not in moved_in) or "none"
+    return [f"columns moved: {changed}", f"columns unchanged: {unchanged}"]
+
+
+def causes(root, generator_sha, head_sha):
+    """`git log --oneline` of the commits after the generator up to the pass head that touch CAUSES, the body's candidate causes (#1418).
+
+    Unreadable, never "none", when the reports commit names no generator
+    or the checkout lacks either commit (a shallow clone): #1416 named the
+    pass head as the cause because nothing printed the list.
+    """
+    lead = "commits since the generator"
+    if generator_sha is None:
+        return [f"{lead}: unreadable, the reports commit names no generator"]
+    proc = subprocess.run(
+        ["git", "-C", str(root), "log", "--oneline", "--no-decorate", f"{generator_sha}..{head_sha}", "--", *CAUSES],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        lines = proc.stderr.strip().splitlines()
+        return [f"{lead}: unreadable, {lines[-1] if lines else f'git exited {proc.returncode}'}"]
+    rows = proc.stdout.strip().splitlines()
+    lead = f"{lead} ({generator_sha[:7]}..{head_sha[:7]}) under {' or '.join(CAUSES)}, the body's candidate causes"
+    if not rows:
+        return [f"{lead}: none"]
+    return [f"{lead}:"] + [f"    {row}" for row in rows]
+
+
+def publish(repo, run_id, generator_sha, head_sha, root, out=sys.stdout):
+    """Download the pass's artifact, write FILES into the tree under `root`, say what moved, stamp their figures. Returns the exit code.
+
+    After the files, two things the body claims and #1416 typed wrong:
+    `column_lines`, the classes that differ between the overwritten and
+    the written reports, and `causes`, the src commits between the
+    generator (`generator_sha`, None when the reports commit names none)
+    and the pass head. The seat attributes nothing it did not read there.
 
     The stamp is tests/claims.rs run with MOTHERGOD_BLESS_CLAIMS=1: it
     rewrites each figure README.md, site/index.html and CHANGELOG.md
@@ -409,9 +531,12 @@ def publish(repo, run_id, root, out=sys.stdout):
             if not (Path(scratch) / rel).is_file():
                 print(f"bench-report: the artifact of run {run_id} lacks {rel}; nothing written", file=out)
                 return 1
+        before = {rel: (root / rel).read_text() if (root / rel).is_file() else "" for rel in FILES if rel.endswith(".md")}
         for rel in FILES:
             shutil.copyfile(Path(scratch) / rel, root / rel)
     print(f"published run {run_id}: {len(FILES)} files written into the tree", file=out)
+    for line in column_lines(before, root) + causes(root, generator_sha, head_sha):
+        print(f"    {line}", file=out)
     stamp = subprocess.run(
         STAMP,
         cwd=root,
@@ -445,7 +570,8 @@ def main():
         print(f"\nbench-report: --publish needs state publish, not {state}", file=sys.stderr)
         return 1
     root = Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip())
-    return publish(args.repo, facts["newest"]["databaseId"], root)
+    generated = facts["generated"]
+    return publish(args.repo, facts["newest"]["databaseId"], generated and generated["sha"], facts["newest"]["headSha"], root)
 
 
 if __name__ == "__main__":
