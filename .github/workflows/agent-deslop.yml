@@ -109,8 +109,7 @@ jobs:
             never in an issue for the maintainer (#1409, #1585). A slop
             finding elsewhere is somebody else's, no PR for it.
 
-            Work in strict priority order and STOP after ONE unit of
-            work:
+            One unit of work per run, in this order:
             1. Your own open PRs labeled changes-requested with no push
                after the verdict, or whose checks are red. Oldest first:
                check out the branch, fix it, `cargo x check`, push with
@@ -123,9 +122,9 @@ jobs:
                number,title,createdAt`, oldest first; `gh pr list --limit 100
                --json number,closingIssuesReferences` says which are
                taken, GitHub's own parse, not a word search (#1428);
-               one outside src/ stays the maintainer's. A stated scope
-               is a hunt already paid for: take it on a new branch
-               claude/deslop-<slug>, `Closes #N` in the PR body. One
+               one outside src/ stays the maintainer's. Take it on a
+               new branch claude/deslop-<slug>, `Closes #N` in the PR
+               body. One
                whose finding no longer holds on main is closed with the
                reason (`gh-comment <N> --close`); a close is not the
                unit, move to the next.
@@ -135,14 +134,15 @@ jobs:
 
             The PR body is the report. State: the scope in one sentence
             and why that scope; each defect removed and which taxonomy
-            rule it violated; how behaviour preservation was proved,
-            naming the commands you ran; the number of the issue you
-            filed for any second scope you found (`gh-comment --new`,
-            label product), never as a sentence: a body is not a queue.
-            No severity ratings, no status headers. CHANGELOG.md only
-            for a user-visible change. Your final response is a status
-            post (Voice S1): first sentence the PR opened, or that
-            nothing shipped.
+            rule it violated; the repro that proves behaviour preserved;
+            the number of the issue you filed for any second scope you
+            found (`gh-comment --new`, label product), never as a
+            sentence: a body is not a queue. No severity ratings, no
+            status headers. CHANGELOG.md only for a user-visible change.
+            Your final response is a status post (Voice S1): first
+            sentence the PR opened, or that nothing shipped. A no-op
+            post is that sentence and its one clause why; the hunt log
+            stays in the transcript (#1986).
           # Bash unrestricted, and `--tools` the set this seat's sessions
           # call, per agents/GOVERNANCE.md "Tool envelopes": Bash, Read,
           # Edit and Write across 101 runs to 2026-10-25, Skill never.
