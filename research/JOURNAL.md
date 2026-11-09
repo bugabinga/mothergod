@@ -10654,8 +10654,9 @@ record.
   bits per literal byte at S2-R43's 21,088,971, before any goes to a
   token coder; the keeper spends twice that on train. | Verdict:
   **rejected**, the corpus policy's, train and sealed both rising. Class
-  (a) as LZMA ships it does not fit rung 1's room on train; what would
-  is a per-byte choice among orders, the work (b) and (c) do. | **Not
+  (a), LZMA's literal coder short of its matched-literal mode, does not
+  fit rung 1's room on train; what would is a per-byte choice among
+  orders, the work (b) and (c) do. | **Not
   measured:** matched-literal mode, which needs rep0's byte in
   `literal_pairing`'s `Context`; decode cost, the pricer being unwired;
   Silesia's literal stream; real coder against ideal cost.
