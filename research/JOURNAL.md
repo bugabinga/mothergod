@@ -10661,3 +10661,77 @@ record.
   `literal_pairing`'s `Context`; decode cost, the pricer being unwired;
   Silesia's literal stream; real coder against ideal cost.
   `research/progress.jsonl` it310 to it317.
+- S2-A159 | ACCEPTED, unwired | Charter #1922 question 2, class (b): an
+  lpaq-class bit-level literal coder, three adaptive experts mixed in the
+  logit domain and calibrated by one APM. Hypothesis: the per-byte choice
+  among orders that S2-R44 found class (a) lacks, done per bit by a small
+  mixer, brings the literal cost inside rung 1's room with no per-symbol
+  table. | Mechanism, after Mahoney's lpaq1 (2007), cut to three experts:
+  `mothergod::literal::bit_mix::BitMix`. Each expert holds one probability
+  per bit-tree node of its key, stored `f32`, starting at one half and
+  updated `p += (bit - p) / (n + 1.5)`, `n` the slot's earlier updates
+  capped at 1023 (`cm_path::Counter`, unchanged). Keys: the previous byte;
+  the byte two back; the alignment key, position mod 4 and the previous
+  byte's high nibble. 576 keys, no hashing. Per node each expert's `p` is
+  clamped to `[1/4096, 1 - 1/4096]` and stretched; with a constant 1/4
+  they are four inputs dotted with one of 256 weight vectors, selected by
+  depth and the wire model's weight key (the previous byte's high nibble,
+  after-copy), every weight starting at 0.2; `p = clamp(squash(dot))`. An
+  APM per node, 33 bins over stretch -8 to 8 at 1/2, each starting at the
+  `squash` of its own stretch, interpolates at `stretch(p)` held to
+  +-7.999; the coded probability is `clamp((p + 3a) / 4)`. After the bit:
+  the two bins each move `0.01 * interpolation weight * (bit - bin)`; each
+  weight moves `0.04 * (bit - p) * input` (`logistic_gradient_step`);
+  each expert's slot updates. `stretch` and `squash` are
+  `crate::logistic`'s. `mothergod_bench::bit_mix` prices it against
+  `Literal::walk_logit_sse` under a fresh `SurpriseLogisticMix`, both
+  sides ideal cost through `literal_pairing`. | Measured, main at
+  `944417b`, version 22, train mean against main, then each try's delta
+  against the champion it was applied to. Kept: it318 orders 0, 1 and
+  exact 2, sets by node, no APM, limit 127, rate 0.02, weights 0.3,
+  **+0.063844**, the class's entry point; it319 alignment for order 0
+  (-0.027181); it322 sets by depth and weight key (-0.007422); it325 the
+  APM by node (-0.011934); it328 limit 1023 (-0.000047); it330 mixer rate
+  0.04 (-0.000094); it331 the wire model's 12-bit order-2 key for the
+  exact one (-0.042548); it332 the byte two back alone for it (-0.013873);
+  it336 APM rate 0.01 (-0.000138); it338 the bias input (-0.000261); it341
+  weights 0.2 (-0.000077). Reverted: it320 order 0 as a fourth expert
+  (-0.001845, outside the charter's two or three); it321 sets by weight key
+  (+0.014700); it323 by node and weight key (+0.027584); it324 one set
+  (+0.041530); it326 APM by node and previous byte (+0.012039); it327 limit
+  30 (+0.000585); it329 mixer rate 0.01 (+0.002968); it333 the 12-bit
+  order 2 as a fourth expert (+0.001284); it334 order 0 for order 1
+  (+0.006961); it335 two experts, no alignment (+0.024175); it337 APM rate
+  0.04 (+0.003605); it339 weights 0.5 (+0.003513); it340 order 1 keyed by
+  after-copy too (+0.001535). it338 to it341 first ran against a stale
+  champion, some twice, and were re-run against the champion of their
+  time; only the re-runs are recorded. The keeper through
+  `bit_mix::train_and_sealed_delta_bpb`: train **-0.039731**, sealed
+  `access_log` **-0.001270**, `gradient_image` **-0.250607**. Per train
+  case: `entropy_ladder_h1` -0.001326, `h2` -0.004320, `h4` -0.011549,
+  `h6` -0.031717, `h8` -0.037297, `markov_h8_2_trap` -0.118683,
+  `json_records` +0.000158, `base64_wrapped` -0.005032,
+  `interleaved_audio16` -0.206932, `sqlite_like_records` -0.021332,
+  `x86_dense_code` +0.000988. Pooled over train's 219,956 literal bytes:
+  1,302,565 bits against 1,324,417, **-0.099 bits per literal byte**. The
+  scratch try driver and the port agree to six digits on every case. |
+  The swing is the key, not the mixer: it331 and it332 together are
+  -0.056, and they turn `interleaved_audio16` from +0.38 to -0.21. Exact
+  order 2 holds 65,536 keys that stay sparse at 50,000 bytes; the byte two
+  back is a 16-bit sample's previous high byte (inferred, not isolated).
+  S2-R44's class (a) lacked both the choice among keys and the byte two
+  back. Speed, one session's reading on a scratch clock, not the speed
+  gate's unit: AMD EPYC 7763, one CPU, three rounds of each pricer's
+  replay over the train cases less a no-op pricer's, which takes the
+  parse: champion **2,510 ns** per literal byte, keeper **1,650 ns**, both
+  including the pricer's per-bit `log2`. The keeper's per-bit work is
+  four `ln` series (three experts, the APM) and one `exp`; S2-R43's
+  literal budget is 147 ns, read on an EPYC 9V45. | Verdict: **accepted**, the corpus policy's,
+  train and both sealed cases falling; unwired, so no format change. The
+  class holds ratio inside rung 1's room with room to spare, and misses
+  the bar's literal budget about 11x as written: question 2's open half
+  for this class is its rate, where lpaq1's table `stretch` and `squash`
+  are the first lever and change the numbers above. | **Not measured:**
+  decode cost in the speed gate's unit; table `stretch` and `squash`;
+  Silesia's literal stream; the real coder against ideal cost; the token
+  coder S2-R43 also prices. `research/progress.jsonl` it318 to it341.

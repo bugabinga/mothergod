@@ -300,22 +300,24 @@ fn adapt(p: f64, count: u16, bit: bool) -> (f64, u16) {
     )
 }
 
-/// A table of [`adapt`]ed bit probabilities, one per slot.
+/// A table of [`adapt`]ed bit probabilities, one per slot, each starting at
+/// one half. The match model's confidence and
+/// [`crate::literal::bit_mix`]'s experts.
 #[derive(Debug, Clone)]
-struct Counter {
+pub(crate) struct Counter {
     probability: Vec<f32>,
     count: Vec<u16>,
 }
 
 impl Counter {
-    fn try_new(slots: usize) -> Result<Self, std::collections::TryReserveError> {
+    pub(crate) fn try_new(slots: usize) -> Result<Self, std::collections::TryReserveError> {
         Ok(Self {
             probability: try_filled_vec(slots, 0.5)?,
             count: try_filled_vec(slots, 0)?,
         })
     }
 
-    fn p(&self, slot: usize) -> f64 {
+    pub(crate) fn p(&self, slot: usize) -> f64 {
         f64::from(self.probability[slot])
     }
 
@@ -323,7 +325,7 @@ impl Counter {
         clippy::cast_possible_truncation,
         reason = "a probability in [0, 1] narrows to f32 by rounding only"
     )]
-    fn update(&mut self, slot: usize, bit: bool) {
+    pub(crate) fn update(&mut self, slot: usize, bit: bool) {
         let (p, count) = adapt(self.p(slot), self.count[slot], bit);
         self.probability[slot] = p as f32;
         self.count[slot] = count;
