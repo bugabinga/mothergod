@@ -560,33 +560,56 @@ fn overrun_payload() -> Vec<u8> {
     )
 }
 
-#[test]
-fn a_whole_buffer_decode_stops_producing_at_the_declared_len() {
-    // Through `decode_tokens`, not `decode`: `decode`'s final length check
-    // rejects the same frame with the same `Corrupt` after every token was
-    // pushed, so only the sink's own length shows `ensure_room` ran first
-    // (`output` was reserved to the declared length, and a push past it
-    // reallocates through the infallible path, hard rule 2).
+/// [`decode_tokens`] over [`overrun_payload`] into `sink`. Through
+/// `decode_tokens`, not [`decode`] or [`count_tokens`]: their final length
+/// check rejects the same frame with the same `Corrupt` after every token was
+/// pushed, so only the sink's own length shows `ensure_room` ran first
+/// (`output` was reserved to the declared length, and a push past it
+/// reallocates through the infallible path, hard rule 2).
+fn decode_overrun<S: DecodeSink<Err = Error>>(sink: &mut S) -> Result<(), Error> {
     let payload = overrun_payload();
     let (_, _, filtered) = split_selector(&payload).expect("the selector is valid");
     let (declared_len, token_count, ac_bytes) =
         read_header(filtered, MAX_DECODED_LEN, Candidate::Identity).expect("the header is valid");
+    decode_tokens(token_count, declared_len, Reach::Standard, ac_bytes, sink)
+}
+
+#[test]
+fn a_whole_buffer_decode_stops_producing_at_the_declared_len() {
     let mut output = Vec::new();
     let mut sink = VecSink {
         output: &mut output,
         column: None,
     };
 
-    let result = decode_tokens(
-        token_count,
-        declared_len,
-        Reach::Standard,
-        ac_bytes,
-        &mut sink,
-    );
-
-    assert_eq!(result, Err(Error::Corrupt));
+    assert_eq!(decode_overrun(&mut sink), Err(Error::Corrupt));
     assert_eq!(output.len(), OVERRUN_DECLARED_LEN as usize);
+}
+
+#[test]
+fn a_counted_decode_stops_producing_and_counting_at_the_declared_len() {
+    // `ensure_room` reads the bound off `Counted::len`, so a wrapper that
+    // reported anything but its inner sink's length would let the overrun
+    // through, into both the output and the counts (#1983).
+    let mut output = Vec::new();
+    let mut classes = ByteClasses::default();
+    let mut sink = Counted {
+        inner: VecSink {
+            output: &mut output,
+            column: None,
+        },
+        classes: &mut classes,
+    };
+
+    assert_eq!(decode_overrun(&mut sink), Err(Error::Corrupt));
+    assert_eq!(output.len(), OVERRUN_DECLARED_LEN as usize);
+    assert_eq!(
+        classes,
+        ByteClasses {
+            literals: u64::from(OVERRUN_DECLARED_LEN),
+            ..ByteClasses::default()
+        }
+    );
 }
 
 #[test]
