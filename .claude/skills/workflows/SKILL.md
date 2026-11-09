@@ -227,13 +227,12 @@ A run that fails and says nothing costs more than a run that never happened.
 - [ ] `cargo x check` passes.
 
 Two items are machine-checked, the rest are yours: `cargo x lint` holds the
-`uses:` pin and the `${{ }}` rule, and `actionlint` runs over every workflow
-in `ci.yml`'s `workflows` job, shellcheck over each `run:` body included,
-with the one message it ignores named beside the step. Install it from its
-[release page][actionlint] to run it before pushing; the job is not required,
-so a red there is the reviewer's to read.
-
-[actionlint]: https://github.com/rhysd/actionlint/releases
+`uses:` pin and the `${{ }}` rule, and `.github/scripts/actionlint` runs
+actionlint over every workflow in `ci.yml`'s `workflows` job, shellcheck over
+each `run:` body included. Run that same script before pushing: it holds the
+pin, the checksum and the one message it ignores, and fetches the binary once
+into `~/.actionlint`. The job is not required, so a red there is the
+reviewer's to read.
 [billing]: https://docs.github.com/en/billing/concepts/product-billing/github-actions
 [cache]: https://docs.github.com/en/actions/reference/dependency-caching-reference
 [events]: https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
