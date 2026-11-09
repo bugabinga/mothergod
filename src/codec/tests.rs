@@ -1592,3 +1592,77 @@ fn fast_reaches_wide_on_input_longer_than_the_window_and_not_on_input_as_long() 
         assert_decode_matches(&payload, &data, "a run at the window");
     }
 }
+
+#[test]
+fn byte_classes_count_every_token_the_header_declares() {
+    let data = crate::test_support::record_text(200);
+    let frame = crate::compress(&data);
+    assert_eq!(frame[crate::METHOD_OFFSET], crate::Method::Lz as u8);
+    let classes = byte_classes(&frame).expect("a valid stream");
+    // The header's token count is the encoder's, so it checks the count
+    // independently of the decode that produced it.
+    let payload = &frame[crate::HEADER_LEN..frame.len() - crate::CHECK_LEN];
+    let (candidate, _, rest) = split_selector(payload).expect("a selector");
+    let (declared_len, token_count, _) =
+        read_header(rest, MAX_DECODED_LEN, candidate).expect("a header");
+    assert_eq!(classes.literals + classes.copies, u64::from(token_count));
+    assert_eq!(classes.literals + classes.copied, declared_len as u64);
+    assert_eq!(declared_len, data.len());
+    assert!(classes.literals > 0 && classes.copies > 0, "{classes:?}");
+    assert_eq!(classes.untokened, 0);
+}
+
+#[test]
+fn byte_classes_count_a_stored_frame_whole_and_sum_a_stream() {
+    let noise: Vec<u8> = crate::test_support::Xorshift32::new(7)
+        .take(1024)
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    let stored = crate::compress(&noise);
+    assert_eq!(stored[crate::METHOD_OFFSET], crate::Method::Stored as u8);
+    let text = crate::test_support::record_text(200);
+    let lz = crate::compress(&text);
+    let lz_classes = byte_classes(&lz).expect("a valid stream");
+    assert_eq!(
+        byte_classes(&stored),
+        Ok(ByteClasses {
+            untokened: noise.len() as u64,
+            ..ByteClasses::default()
+        })
+    );
+    let stream = [lz.as_slice(), &stored].concat();
+    assert_eq!(
+        byte_classes(&stream),
+        Ok(ByteClasses {
+            untokened: noise.len() as u64,
+            ..lz_classes
+        })
+    );
+}
+
+#[test]
+fn count_tokens_rejects_exactly_what_decode_rejects() {
+    // An Identity payload: `decode`'s filter undo cannot fail, so the two
+    // differ only if `count_tokens` skipped one of `decode`'s checks. The
+    // payload is mutated below the frame's check value, which would
+    // otherwise reject every flip before the token loop ran.
+    let payload = encode(&crate::test_support::record_text(20));
+    assert_eq!(payload[0], 0, "Identity's kind byte");
+    let agrees = |mutated: &[u8]| {
+        let counted = count_tokens(mutated, &mut ByteClasses::default());
+        assert_eq!(
+            counted.err(),
+            decode(mutated, MAX_DECODED_LEN).err(),
+            "{mutated:?}"
+        );
+    };
+    for len in 0..payload.len() {
+        agrees(&payload[..len]);
+    }
+    let mut mutated = payload.clone();
+    for bit in 0..payload.len() * 8 {
+        mutated[bit / 8] ^= 1 << (bit % 8);
+        agrees(&mutated);
+        mutated[bit / 8] ^= 1 << (bit % 8);
+    }
+}

@@ -1,6 +1,7 @@
 //! The decode stage table of issue #1930: where the default level's decode
 //! second goes, per stage, from `perf` samples of a release build with line
-//! tables (journal S2-R43, charter #1922 question 1).
+//! tables (journal S2-R43, charter #1922 question 1), and per token class,
+//! over the tokens `mothergod::codec::byte_classes` counts in the frames.
 //!
 //! Pure over the text `perf script -F ip,sym,dso,period --inline` prints
 //! for a `perf record -g` run: no process, no file, so the parser and the
@@ -18,6 +19,7 @@
 //! function calls out of line counts as [`Stage::Libm`], not as SSE
 //! (S2-R43 split those by hand).
 
+use mothergod::codec::ByteClasses;
 use std::fmt::Write as _;
 
 /// One row of the stage table, in the order the table prints.
@@ -106,9 +108,43 @@ impl Stage {
         }
     }
 
+    /// The token class [`format_classes`] charges the stage's time to, or
+    /// `None` for a stage that serves both. S2-R43's split, which the
+    /// charter's figures compare against: the literal stages and
+    /// [`Stage::Libm`], whose only callers in a `-3` decode are the literal
+    /// walk's `round` and `fma`, are literal time; the token stages and the
+    /// copy are copy time, the flag every literal also decodes included.
+    /// Unlike S2-R43, [`Stage::Libc`] is in neither: since #1972 it is the
+    /// output writes of both classes, where S2-R43's also held the literal
+    /// walk's table `memset` (S2-A157).
+    #[must_use]
+    pub const fn class(self) -> Option<TokenClass> {
+        match self {
+            Stage::Sse
+            | Stage::Mix
+            | Stage::UpperMasses
+            | Stage::Walk
+            | Stage::BitDecode
+            | Stage::LiteralRest
+            | Stage::Libm => Some(TokenClass::Literal),
+            Stage::TokenModel | Stage::OffsetBits | Stage::Copy => Some(TokenClass::Copy),
+            Stage::Libc | Stage::Kernel | Stage::Rest => None,
+        }
+    }
+
     const fn index(self) -> usize {
         self as usize
     }
+}
+
+/// The two kinds of token a `Method::Lz` frame codes, one row each of
+/// [`format_classes`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TokenClass {
+    /// A literal token, one byte.
+    Literal,
+    /// A match or rep token, the bytes it copies.
+    Copy,
 }
 
 /// Function paths and the stage each one decides, matched against a
@@ -377,9 +413,64 @@ pub fn format_table(tally: &Tally) -> String {
     out
 }
 
+/// `tally`'s time per [`TokenClass`] over the tokens `classes` counted, as
+/// a markdown table: each class's stages by [`Stage::class`], its bytes
+/// and tokens, and nanoseconds per byte and per token, `-` where a class
+/// has none. A closing line names the time charged to neither class and
+/// the bytes no token wrote.
+#[must_use]
+pub fn format_classes(tally: &Tally, classes: &ByteClasses) -> String {
+    let charged = |class: Option<TokenClass>| -> u64 {
+        Stage::ALL
+            .iter()
+            .filter(|stage| stage.class() == class)
+            .map(|stage| tally.periods[stage.index()])
+            .sum()
+    };
+    let per = |nanos: u64, count: u64| match count {
+        0 => "-".to_string(),
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "a profile's nanoseconds and counts stay far below 2^53"
+        )]
+        n => format!("{:.1}", nanos as f64 / n as f64),
+    };
+    let mut out = String::from(
+        "| class | bytes | tokens | s | ns per byte | ns per token |\n|---|---|---|---|---|---|\n",
+    );
+    for (class, name, bytes, tokens) in [
+        (
+            TokenClass::Literal,
+            "literal",
+            classes.literals,
+            classes.literals,
+        ),
+        (TokenClass::Copy, "copy", classes.copied, classes.copies),
+    ] {
+        let nanos = charged(Some(class));
+        writeln!(
+            out,
+            "| {name} | {bytes} | {tokens} | {:.2} | {} | {} |",
+            seconds(nanos),
+            per(nanos, bytes),
+            per(nanos, tokens)
+        )
+        .expect("writing to a String never fails");
+    }
+    writeln!(
+        out,
+        "\nNeither class: {:.2} s of libc, kernel and rest. Bytes in frames with no tokens: {}.",
+        seconds(charged(None)),
+        classes.untokened
+    )
+    .expect("writing to a String never fails");
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{RULES, Stage, Tally, format_table, rule_stage, segments};
+    use super::{RULES, Stage, Tally, format_classes, format_table, rule_stage, segments};
+    use mothergod::codec::ByteClasses;
 
     /// Five samples as `perf script -F ip,sym,dso,period --inline` printed
     /// them for a `perf record -g` decode (perf 7.0.14), binary path cut.
@@ -580,6 +671,46 @@ mod tests {
         assert_eq!(rows[15], "| total | 100.0% | 0.01 |");
         // A tally of nothing prints zeros, not a division by zero.
         assert!(format_table(&Tally::default()).contains("| rest | 0.0% | 0.00 |"));
+    }
+
+    #[test]
+    fn class_table_charges_each_stage_to_its_class_per_byte_and_token() {
+        let mut tally = Tally::default();
+        for (stage, nanos) in [
+            (Stage::Mix, 3_000_000),
+            (Stage::Libm, 1_000_000),
+            (Stage::TokenModel, 600_000),
+            (Stage::OffsetBits, 300_000),
+            (Stage::Copy, 100_000),
+            (Stage::Libc, 2_000_000),
+            (Stage::Rest, 500_000),
+        ] {
+            tally.periods[Stage::ALL.iter().position(|s| *s == stage).expect("listed")] = nanos;
+        }
+        let classes = ByteClasses {
+            literals: 2_000,
+            copies: 50,
+            copied: 4_000,
+            untokened: 7,
+        };
+        let table = format_classes(&tally, &classes);
+        let rows: Vec<&str> = table.lines().collect();
+        assert_eq!(
+            rows[2], "| literal | 2000 | 2000 | 0.00 | 2000.0 | 2000.0 |",
+            "{table}"
+        );
+        assert_eq!(
+            rows[3], "| copy | 4000 | 50 | 0.00 | 250.0 | 20000.0 |",
+            "{table}"
+        );
+        assert_eq!(
+            rows[5],
+            "Neither class: 0.00 s of libc, kernel and rest. Bytes in frames with no tokens: 7.",
+            "{table}"
+        );
+        // A class with no tokens prints a dash, not a division by zero.
+        let none = format_classes(&tally, &ByteClasses::default());
+        assert!(none.contains("| copy | 0 | 0 | 0.00 | - | - |"), "{none}");
     }
 
     /// Whether `fn <name>` opens a definition in `text`: followed by `(`

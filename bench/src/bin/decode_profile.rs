@@ -10,8 +10,10 @@
 //! highest-numbered CPU with `taskset`, and fails when a decode differs
 //! from its file. [`mothergod_bench::decode_profile`] attributes each
 //! sample to a stage through its inline chain and prints the table, CPU
-//! seconds by the `task-clock` periods. Work files are deleted file by
-//! file, so the disk holds one file's frame, output and samples at a time.
+//! seconds by the `task-clock` periods, then the same seconds per token
+//! class over the tokens [`mothergod::codec::byte_classes`] counts in the
+//! frames. Work files are deleted file by file, so the disk holds one
+//! file's frame, output and samples at a time.
 //!
 //! Needs `perf` and `taskset` on `PATH` and `perf_event_paranoid` at 1 or
 //! below; a GitHub-hosted runner ships 4, so run `sudo sysctl
@@ -22,7 +24,8 @@
 //! <file>...`. Encode dominates the wall time: about 27 minutes for all
 //! 12 Silesia files at `-3` on an AMD EPYC 9V45.
 
-use mothergod_bench::decode_profile::{Tally, format_table};
+use mothergod::codec::{ByteClasses, byte_classes};
+use mothergod_bench::decode_profile::{Tally, format_classes, format_table};
 use mothergod_bench::reference::{cpu_model, tool_version};
 use mothergod_bench::repo_root;
 use std::fs::File;
@@ -86,13 +89,15 @@ fn build(root: &Path) -> Result<PathBuf, String> {
 }
 
 /// Compresses `input`, decodes it under `perf` on `cpu`, checks the
-/// decode, and adds its samples to `tally`; returns the file's length.
+/// decode, adds its samples to `tally` and its frame's tokens to
+/// `classes`; returns the file's length.
 fn profile(
     mothergod: &Path,
     input: &Path,
     work: &Path,
     cpu: &str,
     tally: &mut Tally,
+    classes: &mut ByteClasses,
 ) -> Result<usize, String> {
     let frame = work.join("frame.mgdc");
     let decoded = work.join("decoded");
@@ -101,6 +106,12 @@ fn profile(
         Command::new(mothergod).arg("-3").arg("-c").arg(input),
         Some(&frame),
     )?;
+    let coded = std::fs::read(&frame).map_err(|err| format!("{}: {err}", frame.display()))?;
+    let counted = byte_classes(&coded).map_err(|err| format!("{}: {err}", frame.display()))?;
+    classes.literals += counted.literals;
+    classes.copies += counted.copies;
+    classes.copied += counted.copied;
+    classes.untokened += counted.untokened;
     run(
         Command::new("perf")
             .args(["record", "--quiet", "-g", "-F", FREQUENCY, "-o"])
@@ -167,10 +178,11 @@ fn report(inputs: &[PathBuf]) -> Result<(), String> {
         .to_string();
 
     let mut tally = Tally::default();
+    let mut classes = ByteClasses::default();
     let mut bytes = 0;
     for input in inputs {
         eprintln!("profiling {}...", input.display());
-        bytes += profile(&mothergod, input, &work, &cpu, &mut tally)?;
+        bytes += profile(&mothergod, input, &work, &cpu, &mut tally, &mut classes)?;
     }
     let machine = cpu_model().unwrap_or_else(|| "unknown CPU".to_string());
     println!(
@@ -179,6 +191,10 @@ fn report(inputs: &[PathBuf]) -> Result<(), String> {
         inputs.len(),
         tally.samples
     );
-    print!("{}", format_table(&tally));
+    print!(
+        "{}\n{}",
+        format_table(&tally),
+        format_classes(&tally, &classes)
+    );
     Ok(())
 }

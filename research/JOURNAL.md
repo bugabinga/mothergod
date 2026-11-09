@@ -10582,3 +10582,31 @@ record.
   `Logit::position` out of line in `rest` and `interpolate` and `learn`
   inlined under the walk's rule. #1928's third row, the out-of-line
   `round` and `fma`, is its own slice. `research/progress.jsonl` it308.
+- S2-A158 | ACCEPTED | Charter #1922's per-byte-class split, the second
+  of #1930's outputs S2-A154 left unmeasured: `decode_profile` prints the
+  stage table's seconds per token class beside it. S2-R43 counted tokens
+  in a scratch build of `decode_tokens`, deleted with its verdict. |
+  Mechanism: `codec::byte_classes` (`#[doc(hidden)]`) walks a stream's
+  frames as `decompress` does and runs each `Lz` frame's token loop
+  through a sink that wraps the whole-buffer one and counts literals,
+  copies and copied bytes; `decode` and the streaming decode run their
+  sinks bare, so their loop is unchanged. `Stored` and `Cm` frames count
+  as untokened bytes from their headers. `Stage::class` charges each row
+  as S2-R43 did, literal stages and libm to literals, token and copy
+  stages to copies, but leaves libc, kernel and rest in neither, because
+  since #1972 libc is output writes for both classes and no longer the
+  walk's table `memset` (S2-A157). Tests: the counts sum to the header's
+  token count and declared length; a `Stored` frame and a two-frame
+  stream count whole; the counting decode rejects exactly what `decode`
+  rejects over every truncation and bit flip of an Identity payload,
+  and fails with the length check deleted. | Measured, main at
+  `1eb2599`, version 22, AMD EPYC 7763, CPU 3, perf 7.0.14, one `-3`
+  decode of a 3,127,452-byte text file (every tracked `.md` and `.rs`
+  concatenated), 663 samples: 176,257 literal bytes at **2,709.0 ns per
+  byte**, 237,510 copy tokens writing 2,951,195 bytes at **611.1 ns per
+  token**, 49.2 ns per copied byte, 0.04 s in neither; literals and
+  copied bytes sum to the file's length. | Verdict: **accepted**
+  (`kind: "patch"`, null deltas), the capability tests passing. |
+  **Not measured:** Silesia, which S2-R43's 2,409 and 549 ns read;
+  LLVM's loop-vectorize remarks, #1930's last bin output; a second run or
+  CPU. `research/progress.jsonl` it309.
