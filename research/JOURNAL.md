@@ -10610,3 +10610,54 @@ record.
   **Not measured:** Silesia, which S2-R43's 2,409 and 549 ns read;
   LLVM's loop-vectorize remarks, #1930's last bin output; a second run or
   CPU. `research/progress.jsonl` it309.
+- S2-R44 | REJECTED | Charter #1922 question 2, class (a): an LZMA-class
+  literal coder, one adaptive binary probability per bit-tree node keyed
+  by a few context bits, no mixing and no calibration. Hypothesis: the
+  class S2-R43 found to fit the bar's per-byte work also fits rung 1's
+  room, so its literal cost against the default level's stays near zero
+  on train. | Mechanism: after Pavlov's LZMA literal coder (LZMA SDK,
+  `lzma-specification.txt`): 11-bit probabilities starting at one half,
+  updated `p += (target - p) >> shift`, keyed by `prev1 >> (8 - lc)` and
+  `position mod 2^lp`, 256 nodes per key. A scratch caller priced it
+  through `literal_pairing` against `Literal::walk_logit_sse` under a
+  fresh `SurpriseLogisticMix` per case, both sides ideal cost, and was
+  deleted with this verdict. LZMA's matched-literal mode is absent,
+  because `literal_pairing`'s `Context` carries no byte at rep0. |
+  Measured, main at `ee8b1ac`, version 22, train mean against main, then
+  the try's delta against the champion it was applied to: it310 lc 3, lp
+  0, shift 5, xz's default, **+0.178734**, kept as the class's entry
+  point; it311 lc 8, +0.240245 (+0.061511), reverted; it312 shift 4,
+  +0.201495 (+0.022761), reverted; it313 a count-based rate 1/(n + 1.5)
+  down to 1/32, +0.195653 (+0.016919), reverted; it314 the same at
+  1/(n + 2), +0.187271 (+0.008537), reverted; it315 lc 8 at it314's
+  rate, +0.247250 (+0.068516), reverted; it316 lp 2, **+0.162900**
+  (-0.015834), kept; it317 lc 0, lp 2, +0.199894 (+0.036994), reverted.
+  The keeper, lc 3, lp 2, shift 5, through
+  `literal_pairing::train_and_sealed_delta_bpb`: train +0.162900, sealed
+  `access_log` **+0.028675**, `gradient_image` **+0.181632**. Two train
+  cases fall, `entropy_ladder_h8` -0.005383 and `sqlite_like_records`
+  -0.012262; the largest rises are `interleaved_audio16` +0.903631,
+  `markov_h8_2_trap` +0.372171 and `x86_dense_code` +0.332033. Pooled
+  over train's literal bytes the keeper costs **+0.407 bits per literal
+  byte**. The best of the seven settings per case, what an encoder
+  choosing them per frame could reach with its header unpriced, means
+  +0.091509, still +0.805025 on `interleaved_audio16` and +0.208716 on
+  `x86_dense_code`. | No fixed key covers the set, which is S1-L4's
+  bias and variance at 50,000 bytes: lc 8 with a count rate wins the
+  markov trap (-0.063024) and loses `entropy_ladder_h8` (+0.582645),
+  where lc 8 at shift 5 does the reverse (+0.369078, -0.037888). The mix
+  chooses among orders per byte; one bit tree cannot. Audio is not
+  explained by key choice: the keeper's key is the alignment expert's
+  with one prev-byte bit fewer, and pays +0.90 (inferred: the blend of
+  orders carries it, not isolated). Against the room, inferred across
+  corpora: rung 1 leaves 0.020 b/B on Silesia's 211,938,580 bytes, 0.201
+  bits per literal byte at S2-R43's 21,088,971, before any goes to a
+  token coder; the keeper spends twice that on train. | Verdict:
+  **rejected**, the corpus policy's, train and sealed both rising. Class
+  (a), LZMA's literal coder short of its matched-literal mode, does not
+  fit rung 1's room on train; what would is a per-byte choice among
+  orders, the work (b) and (c) do. | **Not
+  measured:** matched-literal mode, which needs rep0's byte in
+  `literal_pairing`'s `Context`; decode cost, the pricer being unwired;
+  Silesia's literal stream; real coder against ideal cost.
+  `research/progress.jsonl` it310 to it317.
