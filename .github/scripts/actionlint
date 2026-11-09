@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# actionlint, pinned once: ci.yml's `workflows` job and a session about to
+# push a workflow both run this, so the version, its checksum and the one
+# message ignored by name live here and nowhere else (#1656: three sessions
+# in two days copied the download out of ci.yml by hand). The binary lands
+# in ~/.actionlint/<version>, the path ci.yml restores from actions/cache
+# keyed on this file's hash, so GitHub's release CDN is read once per pin
+# and not once per run: on 2026-11-09 a minute of 504s outlasted the ten
+# retries below and reddened main (#1987). A bump of VERSION re-reads
+# SHA256 from the release's checksums file.
+set -euo pipefail
+
+VERSION=1.7.12
+SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+# actionlint 1.7.12 does not know the `vulnerability-alerts` permission
+# scope. GitHub grants it: `.github/scripts/security-alerts` reads Dependabot
+# alerts on the job token with it and gets 403 without (measured 2026-10-25).
+IGNORE='unknown permission scope "vulnerability-alerts"'
+
+dir="$HOME/.actionlint/$VERSION"
+bin="$dir/actionlint"
+if [ ! -x "$bin" ]; then
+  mkdir -p "$dir"
+  # Retries cover a release-CDN blip, 5xx and connection errors both (#1961);
+  # the cache around this script covers a fault that outlasts them.
+  curl -sSfL --retry 10 --retry-all-errors --retry-delay 6 -o "$dir/actionlint.tar.gz" \
+    "https://github.com/rhysd/actionlint/releases/download/v$VERSION/actionlint_${VERSION}_linux_amd64.tar.gz"
+  echo "$SHA256  $dir/actionlint.tar.gz" | sha256sum --check --quiet
+  tar -xzf "$dir/actionlint.tar.gz" -C "$dir" actionlint
+  rm "$dir/actionlint.tar.gz"
+fi
+exec "$bin" -ignore "$IGNORE" "$@"

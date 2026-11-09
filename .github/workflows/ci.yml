@@ -281,15 +281,15 @@ jobs:
 
   # The workflow YAML is the agent system itself, and until 2026-10-25
   # nothing read it but a reviewer (#556). actionlint checks every file
-  # under .github/workflows/, shellcheck over each `run:` body included;
-  # a release binary pinned by checksum, because it runs on every PR and
-  # a tag is a pointer. One message is ignored by name: actionlint 1.7.12
-  # does not know the `vulnerability-alerts` permission scope, and GitHub
-  # grants it (`.github/scripts/security-alerts` reads Dependabot alerts
-  # on the job token with it and the session token without it gets 403,
-  # measured 2026-10-25). The `${{ }}`-inside-`run:` rule is `cargo x
+  # under .github/workflows/, shellcheck over each `run:` body included.
+  # Its pin, checksum and the one message ignored by name live in
+  # `.github/scripts/actionlint`, the command a session runs before a
+  # workflow push (#1656); the binary that script fetches is cached keyed
+  # on the script's hash, so GitHub's release CDN is read once per pin and
+  # not once per run: ten retries over a minute did not outlast the 504s
+  # of 2026-11-09 (#1987). The `${{ }}`-inside-`run:` rule is `cargo x
   # lint`'s, in the clippy job above, where it is red one turn after the
-  # edit. The second step is the one check actionlint cannot express:
+  # edit. The last step is the one check actionlint cannot express:
   # agent-bdfl.yml carries its wake predicate twice (concurrency.group and
   # jobs.bdfl.if) because GitHub gives no way to single-source it (issue
   # #145). Not a required check; seconds on every PR either way, so no
@@ -299,18 +299,10 @@ jobs:
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: actionlint
-        env:
-          VERSION: 1.7.12
-          SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
-        run: |
-          set -euo pipefail
-          dir="$RUNNER_TEMP/actionlint"
-          mkdir -p "$dir"
-          # Retries cover a release-CDN blip, 5xx and connection errors both (#1961).
-          curl -sSfL --retry 10 --retry-all-errors --retry-delay 6 -o "$dir/actionlint.tar.gz" "https://github.com/rhysd/actionlint/releases/download/v$VERSION/actionlint_${VERSION}_linux_amd64.tar.gz"
-          echo "$SHA256  $dir/actionlint.tar.gz" | sha256sum --check --quiet
-          tar -xzf "$dir/actionlint.tar.gz" -C "$dir" actionlint
-          "$dir/actionlint" -no-color -ignore 'unknown permission scope "vulnerability-alerts"'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.actionlint
+          key: actionlint-${{ hashFiles('.github/scripts/actionlint') }}
+      - run: .github/scripts/actionlint
       - run: pip install --quiet pyyaml
       - run: python3 .github/scripts/check-bdfl-wake-predicate.py
