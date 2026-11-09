@@ -494,3 +494,87 @@ test("end to end: a gh that cannot read answers UNREADABLE, exit 0 without --pub
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stdout, /^bench-report: UNREADABLE \(bench-report\.yml on main: stub gh: no answer for /);
 });
+
+// A publish body's two claims, read from the run rather than typed (#1418):
+// the column classes that differ between the overwritten and the written
+// reports, and the src commits between the generator and the pass head.
+// The pair moves peak memory and the stamp and nothing else; the scratch
+// repository holds one src commit and one docs commit after the generator,
+// and #1416 named a commit of the second kind as the cause.
+const silesia = (stamp, peak) =>
+  `# Silesia held-out-final snapshot
+
+As of ${stamp}. Corpus: twelve files.
+
+| file | bytes | mothergod b/B | xz -9e b/B | regret | mothergod encode MB/s | mothergod decode MB/s |
+|---|---|---|---|---|---|---|
+| \`dickens\` | 10192446 | 2.243243 | 2.222204 | +0.021039 | 0.141 | 3.776 |
+
+## Frontier: every level of gzip, zstd and xz beside mothergod
+
+| level | b/B | encode MB/s | decode MB/s | peak MiB |
+|---|---|---|---|---|
+| **mothergod** | **1.976185** | **0.134** | **2.901** | **${peak}** |
+| xz -9e | 1.829058 | 1.946 | 67.746 | 506.2 |
+
+## Frontier of mothergod -4: every level of gzip, zstd and xz beside it
+
+| level | b/B | encode MB/s | decode MB/s | peak MiB |
+|---|---|---|---|---|
+| **mothergod -4** | **1.521331** | **0.031** | **0.100** | **972.2** |
+| xz -9e | 1.829058 | 2.283 | 93.182 | 506.6 |
+`;
+
+test("end to end: --publish names the column classes that moved and the src commits since the generator", () => {
+  const root = scratchRepo();
+  const git = (...args) =>
+    spawnSync("git", ["-C", root, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { encoding: "utf8" }).stdout
+      .trim();
+  writeFileSync(join(root, "docs/benchmarks/silesia.md"), silesia("2026-10-19T01:00:00Z", "33.0"));
+  git("add", ".");
+  git("commit", "-q", "-m", "bench: publish the reports regenerated at 1111111");
+  const generator = git("rev-parse", "HEAD");
+  mkdirSync(join(root, "src"), { recursive: true });
+  writeFileSync(join(root, "src/lib.rs"), "x\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "literal: the walk sums each node's half range");
+  const cause = git("rev-parse", "--short", "HEAD");
+  writeFileSync(join(root, "docs/note.md"), "x\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "docs: a note no figure reads");
+  const head = git("rev-parse", "HEAD");
+  const prefix = generator.slice(0, 12);
+  const subject = `bench: publish the reports regenerated at ${prefix} (#1390)`;
+  const pair = {
+    ...answers,
+    "path=docs/benchmarks/canterbury.md": commit(REPORTS.sha, "2026-10-19T04:30:00Z", subject),
+    "path=docs/benchmarks/silesia.md": commit(REPORTS.sha, "2026-10-19T04:30:00Z", subject),
+    [`commits/${prefix}`]: { sha: generator, commit: { committer: { date: "2026-10-19T01:00:00Z" } } },
+    "run list": [pass({ headSha: head })],
+    [`commits/${head}`]: { sha: head, commit: { committer: { date: "2026-10-19T04:00:00Z" } } },
+    download: { ...answers.download, "docs/benchmarks/silesia.md": silesia("2026-10-19T04:00:00Z", "57.2") },
+  };
+  const run = withGh(pair, ["--publish"], root);
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /^    columns moved: peak memory \(silesia\.md\), date \(silesia\.md\)$/m);
+  assert.match(run.stdout, /^    columns unchanged: ratio, throughput$/m);
+  const lead = `commits since the generator \\(${generator.slice(0, 7)}\\.\\.${head.slice(0, 7)}\\)`;
+  assert.match(
+    run.stdout,
+    new RegExp(
+      `^    ${lead} under src or bench/src, the body's candidate causes:\\n        ${cause} literal: the walk sums`,
+      "m",
+    ),
+  );
+  assert.doesNotMatch(run.stdout, /docs: a note no figure reads/);
+});
+
+test("end to end: a generator the checkout lacks reads unreadable, never none", () => {
+  // The spread answers name generator 0ddba11 and head deadbeef, neither an
+  // object of the scratch repository, the shape of a shallow clone.
+  const root = scratchRepo();
+  const run = withGh(answers, ["--publish"], root);
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /^    commits since the generator: unreadable, fatal: /m);
+  assert.match(run.stdout, /^    columns moved: none$/m);
+});
