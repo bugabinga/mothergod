@@ -61,16 +61,18 @@ exclude_re = [
   # mutants: 5
   "replace \\| with \\^ in base64_unwrap::(strict_decode|encode_into)$",
 
-  # Equivalent: banks ORs four disjoint pairs: prev1 (bits 0-7) with
-  # after_copy*ALPHABET (bit 8, ALPHABET is 256); prev1<<8 (bits 8-15)
-  # with prev2 (bits 0-7); position&3 shifted to bits 4-5 with prev1>>4
-  # (bits 0-3); and prev1>>4 (bits 0-3) with after_copy*16 (bit 4).
-  # Every `|` in the function ORs operands whose bits cannot overlap, so
-  # `|` and `^` agree. Function scope: every current `|` in it is proven
-  # above; a `|` added later must repeat this proof or narrow to a pin
-  # (issue #695).
+  # Equivalent: src/literal.rs ORs four disjoint pairs. banks: prev1
+  # (bits 0-7) with after_copy*ALPHABET (bit 8, ALPHABET is 256), and
+  # prev1<<8 (bits 8-15) with prev2 (bits 0-7). align_key: (position %
+  # ALIGN_PHASES)*NIBBLES (bits 4-5, ALIGN_PHASES is 4, NIBBLES is 16)
+  # with prev1>>NIBBLE_BITS (bits 0-3). weight_index: prev1>>NIBBLE_BITS
+  # (bits 0-3) with after_copy*NIBBLES (bit 4). Every `|` in the three
+  # functions ORs operands whose bits cannot overlap, so `|` and `^`
+  # agree. Function scope: every current `|` in them is proven above; a
+  # `|` added later must repeat this proof or narrow to a pin (issue
+  # #695).
   # mutants: 4
-  "replace \\| with \\^ in banks$",
+  "replace \\| with \\^ in (banks|align_key|weight_index)$",
 
   # Equivalent: ResidualTree::decode ORs `top << raw`, whose low `raw`
   # bits are zero, with `decode_bits(raw)`, which sets only those bits, so

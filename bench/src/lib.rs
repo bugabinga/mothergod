@@ -55,6 +55,7 @@
 //! module doc), so that file doesn't exist in the tree yet.
 
 pub mod baseline;
+pub mod bit_mix;
 pub mod cm_path;
 #[cfg(feature = "corpus-fetch")]
 pub mod corpus;

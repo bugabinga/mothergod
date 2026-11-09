@@ -21,8 +21,9 @@ use mothergod::literal::Context;
 use std::hint::black_box;
 
 /// Bits a decision costs: `bit` coded at `probability_of_one`, which
-/// [`CmPath::walk`] has already clamped off certainty.
-fn cost_bits(bit: bool, probability_of_one: f64) -> f64 {
+/// the caller's walk ([`CmPath::walk`], [`crate::bit_mix`]'s two) has
+/// already clamped off certainty.
+pub(crate) fn cost_bits(bit: bool, probability_of_one: f64) -> f64 {
     -(if bit {
         probability_of_one
     } else {

@@ -292,6 +292,18 @@ pub fn advance_word_hash(word_hash: u32, byte: u8) -> u32 {
     }
 }
 
+/// The alignment expert's key, in `0..ALIGN_BANKS`: the output position's
+/// phase and the previous byte's high nibble.
+fn align_key(context: Context) -> usize {
+    ((context.position % ALIGN_PHASES) * NIBBLES) | usize::from(context.prev1 >> NIBBLE_BITS)
+}
+
+/// The mixing-weight key, in `0..WEIGHT_CONTEXTS`: the previous byte's high
+/// nibble and whether a copy preceded this byte.
+fn weight_index(context: Context) -> usize {
+    usize::from(context.prev1 >> NIBBLE_BITS) | (usize::from(context.after_copy) * NIBBLES)
+}
+
 /// Bank indices for [`Context`]'s six experts, and the mixing-weight
 /// index that goes with them.
 fn banks(context: Context) -> ([usize; EXPERTS], usize) {
@@ -300,20 +312,17 @@ fn banks(context: Context) -> ([usize; EXPERTS], usize) {
     let after_copy = usize::from(context.after_copy);
     let rate_context = prev1 | (after_copy * ALPHABET);
     let order2 = ((prev1 << u8::BITS) | prev2) & (ORDER2_BANKS - 1);
-    let nibble = prev1 >> NIBBLE_BITS;
-    let align = ((context.position % ALIGN_PHASES) * NIBBLES) | nibble;
     let word_hash = context.word_hash as usize & (WORD_BANKS - 1);
-    let weight_index = nibble | (after_copy * NIBBLES);
     (
         [
             FAST_BASE + rate_context,
             SLOW_BASE + rate_context,
             ORDER0_BASE,
             ORDER2_BASE + order2,
-            ALIGN_BASE + align,
+            ALIGN_BASE + align_key(context),
             WORD_BASE + word_hash,
         ],
-        weight_index,
+        weight_index(context),
     )
 }
 
@@ -1019,6 +1028,8 @@ impl Literal {
         byte
     }
 }
+
+pub mod bit_mix;
 
 #[cfg(test)]
 mod tests;
