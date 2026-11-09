@@ -20,6 +20,20 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+## 2026-11-09: Editorial: a sentence that sits beside another machine's rates names its own
+
+#1975. After #1974, "Try it" on README and `/` still printed `-3`'s
+0.134 MB/s two sentences before `-4`'s 0.031 MB/s. Those rates come from
+different runners. No multiple was derived, but setting the two figures
+that close together invites the reader to divide one by the other.
+
+**The `-4` sentence now says its rates were timed on another machine than
+the rates above it**, and that `xz -9e`'s pair comes from that machine.
+Rejected: dropping `-3`'s rate. `-2` and `-1` are priced against it, on
+one machine, and without it those two rates have nothing to compare with.
+Rule for later sentences: a rate set near a rate from another runner says
+so in its own sentence. Leaving the reader to infer it does not count.
+
 ## 2026-11-08: Editorial: `-4` is priced against a row timed on its own machine
 
 #1958. 6e51dcd ("bench: publish the reports regenerated at 63821dc7bdda
