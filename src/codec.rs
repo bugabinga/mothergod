@@ -1298,6 +1298,115 @@ pub fn decode(payload: &[u8], max_len: u32) -> Result<Vec<u8>, Error> {
     undo_filter(candidate, output)
 }
 
+/// A stream's decoded bytes by the token class that wrote them: the
+/// per-byte-class split charter #1922 prices a literal coder and a token
+/// coder against (issue #1930, `research/JOURNAL.md` S2-R43).
+///
+/// A [`crate::Method::Lz`] frame's counts are of the filtered stream its
+/// tokens write, so `literals + copied` is its declared length, which
+/// differs from its output length only under a filter that changes length
+/// ([`Candidate::Base64`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ByteClasses {
+    /// Bytes coded as literal tokens, one byte each.
+    pub literals: u64,
+    /// Match and rep tokens.
+    pub copies: u64,
+    /// Bytes the copies write.
+    pub copied: u64,
+    /// Output bytes of [`crate::Method::Stored`] and [`crate::Method::Cm`]
+    /// frames, which code no tokens.
+    pub untokened: u64,
+}
+
+/// Every frame of `input`, as [`crate::decompress`] reads it, counted into
+/// [`ByteClasses`]. A [`crate::Method::Lz`] frame runs [`decode`]'s token
+/// loop through a counting sink, and its output is dropped once its length is
+/// checked, so memory is one frame's declared length, bounded by
+/// [`MAX_DECODED_LEN`]; no filter is undone. Other frames are counted from
+/// their headers and never decoded.
+///
+/// # Errors
+///
+/// An [`Error`] wherever [`crate::decompress`] would return one on the
+/// frames it reaches, except a [`crate::Method::Cm`] frame's payload, which
+/// is not decoded, and a filter undo, which is not run.
+///
+/// # Panics
+///
+/// Never, on any `input`.
+pub fn byte_classes(input: &[u8]) -> Result<ByteClasses, Error> {
+    let mut classes = ByteClasses::default();
+    for frame in crate::Frames::new(input) {
+        let frame = frame?;
+        match frame.method {
+            crate::Method::Lz => count_tokens(frame.payload, &mut classes)?,
+            crate::Method::Stored | crate::Method::Cm => classes.untokened += frame.output_len,
+        }
+    }
+    Ok(classes)
+}
+
+/// [`decode`] up to its length check, through [`Counted`], adding one
+/// [`crate::Method::Lz`] payload's tokens to `classes`.
+fn count_tokens(payload: &[u8], classes: &mut ByteClasses) -> Result<(), Error> {
+    let (candidate, reach, payload) = split_selector(payload)?;
+    let (declared_len, token_count, ac_bytes) = read_header(payload, MAX_DECODED_LEN, candidate)?;
+    let column = ColumnCoding::try_new(candidate.columns(), declared_len)?;
+    let mut output: Vec<u8> = try_with_capacity(declared_len)?;
+    let mut sink = Counted {
+        inner: VecSink {
+            output: &mut output,
+            column,
+        },
+        classes,
+    };
+    decode_tokens(token_count, declared_len, reach, ac_bytes, &mut sink)?;
+    if output.len() != declared_len {
+        return Err(Error::Corrupt);
+    }
+    Ok(())
+}
+
+/// [`DecodeSink`] that runs `inner` and counts each token into `classes`,
+/// for [`byte_classes`]. [`decode`] and [`decode_to_writer`] run their sinks
+/// bare, so the count costs their token loop nothing.
+struct Counted<'c, S> {
+    inner: S,
+    classes: &'c mut ByteClasses,
+}
+
+impl<S: DecodeSink> DecodeSink for Counted<'_, S> {
+    type Err = S::Err;
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn literal(
+        &mut self,
+        models: &mut Models,
+        ac: &mut Decoder,
+        context: Context,
+    ) -> Result<u8, S::Err> {
+        let byte = self.inner.literal(models, ac, context)?;
+        self.classes.literals += 1;
+        Ok(byte)
+    }
+
+    fn copy(
+        &mut self,
+        len: u32,
+        distance: NonZeroU32,
+        context: Context,
+    ) -> Result<Context, S::Err> {
+        let context = self.inner.copy(len, distance, context)?;
+        self.classes.copies += 1;
+        self.classes.copied += u64::from(len);
+        Ok(context)
+    }
+}
+
 /// Streaming counterpart to [`decode`], reached only through
 /// [`crate::decompress_to_writer`].
 ///
