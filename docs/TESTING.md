@@ -353,6 +353,12 @@ The decoder's contract: **never panic, never overallocate, on any input.**
   `mutants-debt` (#1939).
 - Advisory, not a required check, until four weeks pass with no false
   positive. Missed mutants appear as annotations on the changed lines.
+- The binary and its version pin come from `.github/actions/cargo-mutants`,
+  which the two mutants workflows and the maintainer and reviewer seats
+  share, so a survivor's fix is proven by `cargo mutants --re <function>`
+  in the seat (test-craft's survivor triage). A local repro installs that
+  pin with `cargo install cargo-mutants --version <pin> --locked` and runs
+  the mutate step's line from the workflow.
 - Mutants no test can decide are excluded in `tests/mutants.toml`, each
   with its proof (#391's ruling); its header says why it does not live
   in `.cargo/`.

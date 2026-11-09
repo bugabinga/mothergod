@@ -61,7 +61,8 @@
 # No rust-cache: a monthly job's cache is evicted after seven idle days,
 # so it would be saved every run and restored never, and the crate has no
 # runtime dependencies to make the cold build worth caching. The
-# cargo-mutants binary cache is mutants-check's, kept warm by every PR.
+# cargo-mutants binary comes from .github/actions/cargo-mutants, its
+# cache kept warm by every PR and every maintainer wake.
 name: mutants-sweep
 
 on:
@@ -78,7 +79,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_MUTANTS_VERSION: "27.1.0"
   # The matrix below lists 0..SHARDS-1; change both together.
   SHARDS: "12"
 
@@ -94,14 +94,7 @@ jobs:
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cargo/bin/cargo-mutants
-          key: cargo-mutants-${{ runner.os }}-${{ env.CARGO_MUTANTS_VERSION }}
-      # Guarded by the binary, not by `cargo install`'s own check: the cache
-      # restores the binary without ~/.cargo/.crates.toml, so an unguarded
-      # install rebuilds from source on every hit (mutants-check.yml).
-      - run: test -x ~/.cargo/bin/cargo-mutants || cargo install cargo-mutants --version "$CARGO_MUTANTS_VERSION" --locked
+      - uses: ./.github/actions/cargo-mutants
 
       # 200 minutes inside the step, under the step's own 210: the inner
       # `timeout` interrupts cargo-mutants, which has written every decided

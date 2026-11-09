@@ -74,6 +74,13 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         if: steps.guard.outputs.paused != 'true'
 
+      # cargo-mutants, so a survivor's fix is proven by the tool's own
+      # `caught` line (test-craft's survivor triage) and not by a mutation
+      # edited in by hand, which #1984 took twice. This seat installs on a
+      # miss: it wakes on main, so its save is the entry every PR reads.
+      - uses: ./.github/actions/cargo-mutants
+        if: steps.guard.outputs.paused != 'true'
+
       # One row a minute of this VM's vitals to the session table while
       # the session runs (#1665): five heartbeats in 27 hours died to a
       # SIGTERM that skips every `always()` step below, so nothing written

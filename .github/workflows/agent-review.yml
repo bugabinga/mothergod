@@ -200,6 +200,13 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         if: steps.guard.outputs.paused != 'true' && steps.stamp.outputs.stands != 'true'
 
+      # cargo-mutants, restored only: a PR is waiting, so a miss costs
+      # nothing and the review says it mutated by hand (survivor triage).
+      - uses: ./.github/actions/cargo-mutants
+        if: steps.guard.outputs.paused != 'true' && steps.stamp.outputs.stands != 'true'
+        with:
+          on-miss: skip
+
       - id: bun
         uses: ./.github/actions/seat-bun
       - id: claude

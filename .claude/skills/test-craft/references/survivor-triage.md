@@ -28,6 +28,19 @@ the line first:
   private helper, or a refactor that exposes one to a test: that is
   scaffold held to the suite's standard, the pattern ADR-0056 retires.
 
+Prove the fix with the tool, scoped to the function, and cite its
+`caught` line:
+
+```
+cargo mutants --config tests/mutants.toml --package mothergod \
+  -f <file> --re '<function>'
+```
+
+The maintainer and reviewer seats carry the binary from the Actions
+cache (`.github/actions/cargo-mutants`, the one pin); it builds a copy
+of the tree cold, so never run it unscoped. When `cargo-mutants` is
+absent (a cache miss), apply the mutation by hand and say so.
+
 Legitimate non-fixes in either territory, each with its evidence on the
 record:
 

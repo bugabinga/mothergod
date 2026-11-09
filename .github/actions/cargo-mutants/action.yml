@@ -1,0 +1,70 @@
+name: cargo-mutants
+description: >-
+  The one cargo-mutants this repository runs, restored from the Actions
+  cache under its pinned version. mutants-check and mutants-sweep build
+  it on a miss (`on-miss: install`, `cargo install` from source, about
+  a minute, saved for every later run on main); the maintainer seat
+  does the same, because it wakes on main several times a day and so
+  keeps main's entry warm for every pull request to read downhill (the
+  workflows skill). The reviewer seat only restores (`on-miss: skip`):
+  it answers a waiting PR, so it never pays the build, and a miss
+  leaves the binary absent, where test-craft's survivor triage falls
+  back to a mutation applied by hand and says so.
+
+  Before this action the cache and install block lived three times
+  with its pin in two files, and no seat had the tool: on #1984 the
+  maintainer and then the reviewer each proved the fix for two
+  `Counted::len` survivors by editing the mutation in by hand.
+
+  Guarded by the binary, not by `cargo install`'s own check: the cache
+  restores the binary without ~/.cargo/.crates.toml, so an unguarded
+  install rebuilds from source on every hit (fuzz-check learned this).
+  A caller that also runs Swatinem/rust-cache declares this action
+  after it, or sets its `cache-bin: false`: post-job steps unwind LIFO,
+  and rust-cache's prunes untracked binaries from ~/.cargo/bin, so run
+  first it empties the save here (mutants-check.yml carries the
+  incident).
+
+inputs:
+  version:
+    description: >-
+      cargo-mutants version. No caller passes it; the default is the pin.
+    default: "27.1.0"
+  on-miss:
+    description: >-
+      install: `cargo install` on a cache miss and save the entry.
+      skip: leave the binary absent on a miss.
+    default: install
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        ON_MISS: ${{ inputs.on-miss }}
+      run: |
+        set -euo pipefail
+        case "$ON_MISS" in
+          install|skip) ;;
+          *) echo "unsupported on-miss: $ON_MISS" >&2; exit 2 ;;
+        esac
+
+    - if: inputs.on-miss == 'install'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cargo/bin/cargo-mutants
+        key: cargo-mutants-${{ runner.os }}-${{ inputs.version }}
+
+    - if: inputs.on-miss == 'skip'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cargo/bin/cargo-mutants
+        key: cargo-mutants-${{ runner.os }}-${{ inputs.version }}
+
+    - if: inputs.on-miss == 'install'
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        test -x ~/.cargo/bin/cargo-mutants || cargo install cargo-mutants --version "$VERSION" --locked

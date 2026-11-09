@@ -88,9 +88,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # One pin for both jobs below: they share the cached binary, and the
-  # exclusions job reads a list the mutants job must agree with.
-  CARGO_MUTANTS_VERSION: "27.1.0"
 
 jobs:
   mutants:
@@ -107,16 +104,11 @@ jobs:
         with:
           # --merge-base needs the base branch present, not just the merge ref.
           fetch-depth: 0
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cargo/bin/cargo-mutants
-          key: cargo-mutants-${{ runner.os }}-${{ env.CARGO_MUTANTS_VERSION }}
-      # Guarded by the binary, not by `cargo install`'s own check: the cache
-      # restores the binary without ~/.cargo/.crates.toml, so an unguarded
-      # install rebuilds from source on every hit (fuzz-check learned this).
-      - run: test -x ~/.cargo/bin/cargo-mutants || cargo install cargo-mutants --version "$CARGO_MUTANTS_VERSION" --locked
-      # cache-bin: false, because this workflow already caches
-      # ~/.cargo/bin/cargo-mutants itself (above): Swatinem's own bin
+      # One pin for both jobs: the action holds it, and the exclusions job
+      # below reads a list this job must agree with.
+      - uses: ./.github/actions/cargo-mutants
+      # cache-bin: false, because the action above already caches
+      # ~/.cargo/bin/cargo-mutants itself: Swatinem's own bin
       # management defaults on and prunes untracked binaries from that same
       # directory in its post-job step, which runs before the plain
       # actions/cache save (post-job hooks unwind LIFO, and this step is
@@ -241,11 +233,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cargo/bin/cargo-mutants
-          key: cargo-mutants-${{ runner.os }}-${{ env.CARGO_MUTANTS_VERSION }}
-      - run: test -x ~/.cargo/bin/cargo-mutants || cargo install cargo-mutants --version "$CARGO_MUTANTS_VERSION" --locked
+      - uses: ./.github/actions/cargo-mutants
       # --no-config on purpose: with the config applied an excluded mutant
       # is absent from the list either way, which is the blindness itself.
       - run: cargo mutants --list --no-config --package mothergod --colors=never > mutants.list
