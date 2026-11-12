@@ -70,7 +70,7 @@ jobs:
         uses: ./.github/actions/seat-bun
       - id: claude
         if: steps.guard.outputs.paused != 'true'
-        uses: anthropics/claude-code-action@d535f5172dec02b204866b393d6b20b9b2aaf98d # v1
+        uses: anthropics/claude-code-action@9eb012b6d0900c2b9eede65ee1758cec4d2973e9 # v1
         env:
           # The token sidecar's newest mint; the four writers read it at
           # each gh call (#1687).
