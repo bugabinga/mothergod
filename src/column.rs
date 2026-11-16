@@ -46,7 +46,7 @@ pub fn bank_of(
     len: usize,
     max_banks: NonZeroUsize,
 ) -> usize {
-    column_of(position, columns, len) % max_banks.get()
+    column_of(position, columns, len) % max_banks
 }
 
 #[cfg(test)]
