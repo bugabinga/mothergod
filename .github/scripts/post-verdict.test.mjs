@@ -35,8 +35,8 @@ const argv = process.argv.slice(2);
 appendFileSync(${JSON.stringify(log)}, JSON.stringify({ argv, token: process.env.GH_TOKEN ?? null }) + "\\n");
 if (argv[1] === "edit" && ${failEdit}) { console.error("label not found"); process.exit(1); }
 if (argv[1] === "edit" && ${editFlaky} && readFileSync(${
-      JSON.stringify(log)
-    }, "utf8").split("\\n").filter((l) => l.includes('"edit"')).length === 1) { console.error("HTTP 502: Server Error"); process.exit(1); }
+  JSON.stringify(log)
+}, "utf8").split("\\n").filter((l) => l.includes('"edit"')).length === 1) { console.error("HTTP 502: Server Error"); process.exit(1); }
 if (argv[1] === "view" && ${failView}) { console.error("HTTP 502"); process.exit(1); }
 if (argv[1] === "view") { console.log(${armed} ? '{"enabledAt":"2026-10-20T20:26:51Z"}' : "null"); process.exit(0); }
 if (argv[1] === "merge" && ${failDisarm}) { console.error("not permitted"); process.exit(1); }

@@ -501,8 +501,7 @@ test("end to end: a gh that cannot read answers UNREADABLE, exit 0 without --pub
 // The pair moves peak memory and the stamp and nothing else; the scratch
 // repository holds one src commit and one docs commit after the generator,
 // and #1416 named a commit of the second kind as the cause.
-const silesia = (stamp, peak) =>
-  `# Silesia held-out-final snapshot
+const silesia = (stamp, peak) => `# Silesia held-out-final snapshot
 
 As of ${stamp}. Corpus: twelve files.
 

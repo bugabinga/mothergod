@@ -33,11 +33,12 @@ const QUIET = [
   [1, "systemd", "S (sleeping)"],
   [4242, "node", "R (running)"],
 ];
-const BUSY = [...QUIET, [777, "cargo", "S (sleeping)"], [778, "rustc", "R (running)"], [
-  779,
-  "cargo-clippy",
-  "D (disk sleep)",
-]];
+const BUSY = [
+  ...QUIET,
+  [777, "cargo", "S (sleeping)"],
+  [778, "rustc", "R (running)"],
+  [779, "cargo-clippy", "D (disk sleep)"],
+];
 
 function ciEnv(root, extra = {}) {
   return { PATH: process.env.PATH, GITHUB_ACTIONS: "true", DENY_PARKED_TURN_PROC: root, ...extra };

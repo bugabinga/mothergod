@@ -112,9 +112,10 @@ fn format_document(path: &Path, source: &str) -> Result<String, String> {
             format_script(FormatTextOptions {
                 path,
                 extension: None,
-                text: source.to_owned(),
+                text: source.into(),
                 config: &config,
                 external_formatter: None,
+                arena_pool: None,
             })
             .map_err(|error| error.to_string())?
             .unwrap_or_else(|| source.to_owned())

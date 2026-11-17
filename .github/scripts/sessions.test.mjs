@@ -1038,15 +1038,10 @@ test("backfill writes a row for a run the runner stopped under: stop_reason kill
     );
     assert.deepEqual([row.measured, row.stop_reason, row.duration_ms], [0, "killed", (48 * 60 + 16) * 1000]);
     // What the session would have reported is NULL, never 0.
-    assert.deepEqual([row.turns, row.out_tokens, row.denials, row.error, row.writes, row.number, row.model], [
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-    ]);
+    assert.deepEqual(
+      [row.turns, row.out_tokens, row.denials, row.error, row.writes, row.number, row.model],
+      [null, null, null, null, null, null, null],
+    );
     assert.match(r.out, /\| present 1 \| written 0 \| killed 1 \| unreadable 0 \| missing 0$/m);
   });
 });
