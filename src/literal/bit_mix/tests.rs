@@ -111,23 +111,83 @@ fn a_byte_repeated_under_one_context_gets_cheaper() {
 
 #[test]
 fn apm_position_keeps_both_bins_inside_the_row_at_the_clamp_edges() {
+    let table = fresh_stretch_table();
     for p in [MIN_PROBABILITY, 0.5, 1.0 - MIN_PROBABILITY] {
-        let (lower, fraction) = apm_position(p);
+        let (lower, fraction) = apm_position(&table, p);
         assert!(lower + 1 < APM_BINS, "p {p} read past the row at {lower}");
         assert!((0.0..1.0).contains(&fraction), "p {p} fraction {fraction}");
     }
-    assert_eq!(apm_position(0.5), (16, 0.0), "one half is the middle bin");
+    assert_eq!(
+        apm_position(&table, 0.5),
+        (16, 0.0),
+        "one half is the middle bin"
+    );
 }
 
 #[test]
 fn a_fresh_apm_row_maps_a_probability_to_itself_within_interpolation_error() {
     let row = fresh_apm_row();
+    let table = fresh_stretch_table();
     for p in [0.01, 0.2, 0.5, 0.7, 0.99] {
-        let (lower, fraction) = apm_position(p);
+        let (lower, fraction) = apm_position(&table, p);
         let calibrated = row[lower] * (1.0 - fraction) + row[lower + 1] * fraction;
         assert!(
             (calibrated - p).abs() < 0.02,
             "p {p} calibrated {calibrated}"
         );
     }
+}
+
+#[test]
+fn table_stretch_is_exact_on_the_grid_and_inside_one_rounding_step_between() {
+    let table = fresh_stretch_table();
+    let half_step = 0.5 / f64::from(STRETCH_STEPS);
+    let clamped = |p: f64| stretch(clamp_logistic_probability(p));
+    for i in 0..=STRETCH_STEPS {
+        let p = f64::from(i) / f64::from(STRETCH_STEPS);
+        assert!(
+            (table_stretch(&table, p) - clamped(p)).abs() < 1e-6,
+            "grid point {i}"
+        );
+    }
+    // `stretch` rises with `p`, so the table's error at `p` is at most the
+    // rise across the rounding interval around it.
+    for i in 1..4000 {
+        let p = f64::from(i) * 0.000_25 + 0.000_013;
+        let bound = clamped(p + half_step) - clamped(p - half_step) + 1e-6;
+        assert!(
+            (table_stretch(&table, p) - clamped(p)).abs() <= bound,
+            "p {p}: {} against {}",
+            table_stretch(&table, p),
+            clamped(p)
+        );
+    }
+}
+
+#[test]
+fn table_stretch_reads_inside_the_table_for_every_probability_the_walk_holds() {
+    let table = fresh_stretch_table();
+    for p in [0.0, f64::MIN_POSITIVE, 0.5, 1.0 - f64::EPSILON, 1.0] {
+        assert!(table_stretch(&table, p).is_finite(), "p {p}");
+    }
+}
+
+#[test]
+fn table_squash_follows_squash_within_its_interpolation_error_and_saturates_past_the_range() {
+    let table = fresh_squash_table();
+    assert_eq!(table.len(), SQUASH_ENTRIES);
+    for i in -2000..=2000 {
+        let x = f64::from(i) * 0.005;
+        let inside = x.abs() < SQUASH_RANGE;
+        let want = squash(x.clamp(-SQUASH_RANGE, SQUASH_RANGE));
+        let got = table_squash(&table, x);
+        assert!(
+            (got - want).abs() < if inside { 2e-5 } else { 1e-6 },
+            "x {x}: {got} against {want}"
+        );
+    }
+    assert!(
+        table_squash(&table, 0.0) - 0.5 < 1e-12,
+        "squash(0) is one half"
+    );
 }
