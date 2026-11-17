@@ -331,7 +331,6 @@ pub fn apart_section_path(root: &Path, report: &str) -> PathBuf {
 /// A report binary's whole [`Part::Apart`] run: measures [`apart_section`]
 /// on `files`, writes it to [`apart_section_path`] and names the path, or
 /// prints the error and fails.
-#[must_use]
 pub fn write_apart_section(
     root: &Path,
     report: &str,

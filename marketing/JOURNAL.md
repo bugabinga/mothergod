@@ -20,6 +20,158 @@ A rejected approach is recorded with the mechanism of failure, same
 as research/JOURNAL.md. The audience model lives here, in one
 place, and pages cite it rather than restating it.
 
+Standing rules for reading the instruments (the audience model's part
+that does not change week to week):
+
+- **Machine traffic until a referrer says otherwise.** A window whose
+  referrer table names one unrelated domain, whose views are about equal
+  to its uniques, whose most-viewed path other than the repo root has
+  single-digit views, and whose days leave no pageload at mothergod.dev, is
+  not an audience. A human spike from an aggregator lands on the repo root
+  or the site, so one path stands well above the rest. The ledger keeps no
+  per-day path rows, so the test reads the window's tables and then the
+  daily rows inside it (#1964).
+- **A discounted day leaves every proxy it fed.** Views are re-summed from
+  the daily rows without it. Uniques cannot be re-summed, so the restated
+  figure is an upper bound and says so.
+
+## 2026-11-16: Survey: the 162-reader day was aocr.org, machine traffic, and leaves the audience
+
+Eleventh survey, eleven days after the tenth. #1964 asked for this reading.
+
+### (a) Audience
+
+| Metric | 2026-11-16 | 2026-11-05 | Source |
+|---|---|---|---|
+| Stars | 1 | 1 | `gh api repos/bugabinga/mothergod` → `stargazers_count` |
+| Forks | 0 | 0 | same call, `forks_count` |
+| Watchers | 0 | 0 | same call, `subscribers_count` |
+| External issue authors, excluding machine-filed | 0 of 130 | 0 of 129 | `gh issue list --state all --limit 3000`: 96 `app/claude`, 34 `bugabinga`; 493 `app/github-actions` excluded |
+| External PR authors | 0 of 1376 | 0 of 1279 | `gh pr list --state all --limit 4000`: 1321 `app/claude`, 33 `bugabinga`, 22 `app/dependabot` |
+| mothergod.dev pageloads | 1 in 7d | 6 in 7d | Cloudflare Web Analytics GraphQL, `rumPageloadEventsAdaptiveGroups`, account-level, site tag `7c1ab790…`, window 2026-11-09 06:51 UTC to 11-16 06:52 UTC, `avg { sampleInterval }` 1; a second fetch grouped by `date` returned the same 1 |
+| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns no hits; query `mothergod`, `hitsPerPage=100`, returns 100 hits, all titles read, none about the project; query `bugabinga` returns 11 hits, none about the project |
+| lobste.rs submissions | 0 | 0 | `https://lobste.rs/domains/mothergod.dev` still 404 |
+| reddit mentions | not measured | not measured | `reddit.com/search.json` still 403 to the runner IP |
+| Web search presence | absent | repo indexed, site absent | WebSearch for `"bugabinga/mothergod"`: no result names the project (one passing `Mothergod` on a Lemmy post, no link to us); for `mothergod.dev lossless compressor`: none |
+| GitHub repo views, 14d | 19, 8 unique | 22 over the same days that read 220, at most 14 unique (see below) | issue #435 ledger, top table, snapshot run 43711913857 (2026-11-15), window 2026-11-01..11-14; previous column re-summed from the ledger's daily rows for 2026-10-18..10-31 without 10-28 to 10-30 |
+
+**The spike has a source: `aocr.org`.** The ledger's referrer table, new
+since #1962, read `aocr.org` at 189 views from 188 uniques and `github.com`
+at 1 for the window ending 2026-11-07 (the 2026-11-08 edit in issue #435's
+history). aocr.org is the American Osteopathic College of Radiology's
+domain, per WebSearch results that cite Wikipedia mirrors. Its own front
+page answers a non-browser client with Cloudflare's managed challenge (HTTP
+403), so its content was not read, and a search for the domain beside our
+name found no page of theirs that mentions us.
+
+**Why that is machine traffic, by the window's own tables.** The same
+window's path table has the repo root at 9 views and its tenth path at 2.
+The ten most-viewed paths sum to 38 of 216 views, so 178 views
+landed on paths seen once or twice each. People who follow a link converge
+on one page, usually the root. A client walking the repo's issues and pulls
+does not. The three days (18 views from 15 viewers on 10-28, 164 from 162
+on 10-29, 16 from 16 on 10-30) also left no pageload at the site. A client
+that sets its own `Referer`, or a crawler behind a redirect, fits every
+number. The instruments cannot tell the two apart, and the audience is the
+same either way.
+
+**What is withdrawn.** Last week's claim that "162 readers came, and none
+of them acted", and its inference that the repo's first screen "decided
+their visit", rested on those days being people. They were not, so the
+stars count of 1 says nothing about a first screen. The lz4 study in (b)
+last week was chosen on that premise. Its findings stand as practice and
+changed no page, so nothing on the surface is undone.
+
+**Every proxy the days fed, restated.** Only repo views carried them. The
+14-day row of 2026-11-01 read 220 views and 200 uniques for 10-18..10-31.
+The other eleven days sum to 22 views. Their daily uniques sum to 14, which
+bounds the window's real uniques from above, since a viewer who returned on
+two days counts twice in that sum. The earlier rows (10-25: 34 and 11;
+10-18: 35 and 16) do not contain the days and stand. This week's row, 19
+views and 8 uniques, is the first window since the spike with none of it
+inside.
+
+**The human numbers, then.** Eight uniques viewed the repo over fourteen
+days. One visitor loaded the site once (11-14, China, mobile, `/`, no
+referrer). The window's referrer table has one row, `github.com`, at 2 of
+the 19 views. Last week's table was read against a spike; this week's is
+the baseline: single digits, no external actor.
+
+**Caveat on the site instrument.** A fetch over 2026-11-05 to 11-16 read 0
+loads, while the 7-day window read 1. Rows older than about a week are
+sampled at 1 in 10, and a single load can fall out of the sample. The
+7-day row is the only one at interval 1, as on 2026-10-22.
+
+### (b) Study: leerob/pixo and the post behind it
+
+Chosen because (a) now says the audience is single digits, and the nearest
+comparable is another agent-built Rust compressor that did collect readers.
+Read 2026-11-16 from `leerob.com/pixo` (dated December 2025), the
+repository's README and `gh api repos/leerob/pixo`: 480 stars, 32 forks,
+created 2025-12-21, last pushed 2025-12-31. Nothing read here shows where
+those 480 came from, and none is credited to the README.
+
+1. **The process is a measured spend.** The post's account of the agents is
+   "520 agents, 350M tokens, and $287", the models named, the longest agent
+   run named. No adjective stands in for it.
+2. **The README says nothing of agents.** It names the project, gives one
+   sentence of what it is and a "Learn more about this project" link to the
+   post, then features and four ways to use it. `AGENTS.md` and `.cursor`
+   sit in the tree unexplained. The story lives off-page, one link away.
+3. **A zero-install try is the first usage path**, a browser playground
+   marked "(recommended)", ahead of WASM, CLI and crate.
+4. **Strong claims name no corpus on the front page.** "Competitive
+   compression" links a benchmark file; the post says "close to" libjpeg
+   and does not describe the test images in its text. The post also says
+   the benchmarks "may have issues" and invites corrections, and answers
+   its own adoption question "No, not really."
+
+**Adopted: (1), in the form we can afford.** We already publish the spend:
+`/agents` prices every seat from public audit artifacts. The README's agent
+paragraph is the place a reader meets the claim, and it does not link that
+page (#2000). No figure goes in the README, so nothing copies the page's
+numbers.
+
+**Rejected: (2), moving the story off the README.** Our README is
+numbers-first and puts the agents under "Who builds it", below the table,
+where a reader asking "who" already looks. The 2026-10-09 entry placed the
+origin story there for the same reason. A one-link README works for a
+project whose post carries the audience; ours has no post and no audience
+to send.
+
+**Rejected: (3), a browser playground.** It is product work, not a
+surface edit, and no reader has been observed leaving for want of a
+toolchain: the whole audience this week is eight repo viewers and one
+pageload. The release also waits on the default level's speed (ROADMAP M9),
+and a try-it button invites a try of a format that is not frozen.
+
+**Already ours: (4).** Rule 4 names a corpus beside every number, and the
+README states that it is slow, single-run, on one CI machine. pixo
+confirms the habit and adds none.
+
+**Rejected, as a lesson: copying the shape and expecting the attention.**
+pixo's star count belongs to something we did not read, and we publish on
+owned channels only, so the shape is not the missing part.
+
+### (c) What changes because of (a) and (b)
+
+- **#1964 is answered here**: aocr.org is named, 10-28 to 10-30 are out of
+  every proxy they fed, and the machine-traffic rule is in the journal's
+  header.
+- **One surface change, filed**: #2000, a README link to `/agents` in the
+  paragraph that says the agents do the work. Labeled `product` and
+  `marketing`.
+- **The audience, restated for next week**: single digits, no external
+  actor, nothing in the wild. A week that reads higher is held to the
+  machine-traffic rule before it is read as growth.
+- **The conjecture from 11-05 is resolved early.** The referrer was not a
+  human aggregator, so the 10-29 event is dropped from the audience model,
+  as that entry said it would be.
+
+Rejected again, same reason as every prior week: buying reach by posting
+anywhere. A baseline of eight readers is what the project has earned, and
+the number is more useful true than flattered.
+
 ## 2026-11-09: Editorial: a sentence that sits beside another machine's rates names its own
 
 #1975. After #1974, "Try it" on README and `/` still printed `-3`'s
