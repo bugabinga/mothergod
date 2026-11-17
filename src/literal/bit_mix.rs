@@ -15,14 +15,16 @@
 //! lpaq1's `StateMap` rule, no hashing: every key is a byte or less, so the
 //! three tables hold 576 keys of 255 nodes. Per byte the walk reads eight
 //! slots per expert and builds no per-symbol table. Its per-bit
-//! [`stretch`] and [`squash`] are still `crate::logistic`'s series, so it
-//! does not yet fit M9's literal budget (`research/JOURNAL.md` S2-A159).
+//! [`stretch`] and [`squash`] are table lookups, lpaq1's, built once per
+//! model from `crate::logistic`'s series (`research/JOURNAL.md` S2-A160);
+//! the series cost S2-A159's walk most of its time.
 //!
 //! No frame this build writes codes through it; `mothergod_bench` prices
 //! [`BitMix::walk`] against [`super::Literal::walk_logit_sse`] on the
 //! literal stream. Every value goes through IEEE basic operations and
-//! [`crate::logistic`]'s vendored [`stretch`] and [`squash`], never libm
-//! (ADR-0024), so the walk an encoder and a decoder run is bit-identical.
+//! tables built from [`crate::logistic`]'s vendored [`stretch`] and
+//! [`squash`], never libm (ADR-0024), so the walk an encoder and a decoder
+//! run is bit-identical.
 
 use super::{
     ALIGN_BANKS, Context, WEIGHT_CONTEXTS, align_key, clamp_logistic_probability,
@@ -73,6 +75,61 @@ const APM_HELD: f64 = 7.999;
 /// this: 0.02 and 0.04 priced higher on train.
 const APM_RATE: f64 = 0.01;
 
+/// Entries of the stretch table's `[0, 1]` domain, lpaq1's 12 bits.
+const STRETCH_STEPS: u32 = 4096;
+
+/// [`stretch`] of `i / STRETCH_STEPS`, clamped like every coded
+/// probability.
+fn fresh_stretch_table() -> Vec<f32> {
+    (0..=STRETCH_STEPS)
+        .map(|i| {
+            let p = f64::from(i) / f64::from(STRETCH_STEPS);
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "narrowing a stretch to f32"
+            )]
+            let value = stretch(clamp_logistic_probability(p)) as f32;
+            value
+        })
+        .collect()
+}
+
+/// Half the width of the squash table's domain: past it the coded
+/// probability sits on its clamp.
+const SQUASH_RANGE: f64 = 9.0;
+
+/// Squash table entries per unit of stretch.
+const SQUASH_STEPS_PER_UNIT: f64 = 32.0;
+
+/// Entries of the squash table.
+const SQUASH_ENTRIES: usize = 577;
+
+/// [`squash`] at each table point.
+fn fresh_squash_table() -> Vec<f64> {
+    (0..SQUASH_ENTRIES)
+        .map(|i| {
+            #[allow(clippy::cast_precision_loss, reason = "i is at most 576")]
+            let x = i as f64 / SQUASH_STEPS_PER_UNIT - SQUASH_RANGE;
+            squash(x)
+        })
+        .collect()
+}
+
+/// [`squash`] of `x` by linear interpolation in `table`.
+fn table_squash(table: &[f64], x: f64) -> f64 {
+    let scaled =
+        (x.clamp(-SQUASH_RANGE, SQUASH_RANGE - 1e-9) + SQUASH_RANGE) * SQUASH_STEPS_PER_UNIT;
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "scaled is in [0, SQUASH_ENTRIES - 1), truncation is the floor"
+    )]
+    let lower = scaled as usize;
+    #[allow(clippy::cast_precision_loss, reason = "lower is below 577")]
+    let fraction = scaled - lower as f64;
+    table[lower] * (1.0 - fraction) + table[lower + 1] * fraction
+}
+
 /// Charter #1922's class (b) literal model, one per literal stream.
 #[derive(Debug, Clone)]
 pub struct BitMix {
@@ -86,6 +143,11 @@ pub struct BitMix {
     weights: Vec<[f64; INPUTS]>,
     /// One bin row per node, each bin a probability.
     apm: Vec<[f64; APM_BINS]>,
+    /// [`stretch`] at each multiple of `1 / STRETCH_STEPS`.
+    stretch_table: Vec<f32>,
+    /// [`squash`] at each multiple of `1 / SQUASH_STEPS_PER_UNIT` over
+    /// `[-SQUASH_RANGE, SQUASH_RANGE]`.
+    squash_table: Vec<f64>,
 }
 
 impl Default for BitMix {
@@ -108,8 +170,8 @@ fn fresh_apm_row() -> [f64; APM_BINS] {
 /// `p`'s lower APM bin and the upper bin's interpolation weight, in
 /// `[0, 1)`: the lower bin is at most `APM_BINS - 2`, so both read inside
 /// the row.
-fn apm_position(p: f64) -> (usize, f64) {
-    let held = stretch(p).clamp(-APM_HELD, APM_HELD);
+fn apm_position(table: &[f32], p: f64) -> (usize, f64) {
+    let held = table_stretch(table, p).clamp(-APM_HELD, APM_HELD);
     let scaled = (held + APM_RANGE) * APM_STEPS_PER_UNIT;
     #[allow(
         clippy::cast_possible_truncation,
@@ -123,6 +185,20 @@ fn apm_position(p: f64) -> (usize, f64) {
     )]
     let fraction = scaled - lower as f64;
     (lower, fraction)
+}
+
+/// [`stretch`] of `p` read from `table`, `p` rounded to a multiple of
+/// `1 / STRETCH_STEPS`. A `p` outside `[0, 1]` reads the nearest end: the
+/// float-to-integer cast saturates at zero, and `min` bounds the top (a
+/// float clamp here cost about a tenth of the walk).
+fn table_stretch(table: &[f32], p: f64) -> f64 {
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the cast saturates at zero and truncation is the rounding floor"
+    )]
+    let index = (p * f64::from(STRETCH_STEPS) + 0.5) as usize;
+    f64::from(table[index.min(STRETCH_STEPS as usize)])
 }
 
 impl BitMix {
@@ -140,6 +216,8 @@ impl BitMix {
             align: Counter::try_new(ALIGN_BANKS * SSE_CONTEXTS)?,
             weights: crate::try_filled_vec(DEPTHS * WEIGHT_CONTEXTS, [INITIAL_WEIGHT; INPUTS])?,
             apm: crate::try_filled_vec(SSE_CONTEXTS, fresh_apm_row())?,
+            stretch_table: fresh_stretch_table(),
+            squash_table: fresh_squash_table(),
         })
     }
 
@@ -162,10 +240,11 @@ impl BitMix {
         bittree::walk_nodes(|depth, prefix, _lo, mid, _hi| {
             let node = bittree::sse_context(depth, prefix);
             let slots = bases.map(|base| base + node);
+            let table = &self.stretch_table;
             let stretched = [
-                stretch(clamp_logistic_probability(self.order1.p(slots[0]))),
-                stretch(clamp_logistic_probability(self.back2.p(slots[1]))),
-                stretch(clamp_logistic_probability(self.align.p(slots[2]))),
+                table_stretch(table, self.order1.p(slots[0])),
+                table_stretch(table, self.back2.p(slots[1])),
+                table_stretch(table, self.align.p(slots[2])),
                 BIAS,
             ];
             let set = depth as usize * WEIGHT_CONTEXTS + key;
@@ -174,10 +253,10 @@ impl BitMix {
             for (w, s) in weights.iter().zip(&stretched) {
                 dot += w * s;
             }
-            let p = clamp_logistic_probability(squash(dot));
+            let p = clamp_logistic_probability(table_squash(&self.squash_table, dot));
 
             let row = &mut self.apm[node];
-            let (lower, fraction) = apm_position(p);
+            let (lower, fraction) = apm_position(&self.stretch_table, p);
             let calibrated = row[lower] * (1.0 - fraction) + row[lower + 1] * fraction;
             // The APM carries three quarters of the coded probability,
             // lpaq1's blend. Plain operations, not `mul_add`, which is a

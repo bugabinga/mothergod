@@ -10734,4 +10734,52 @@ record.
   are the first lever and change the numbers above. | **Not measured:**
   decode cost in the speed gate's unit; table `stretch` and `squash`;
   Silesia's literal stream; the real coder against ideal cost; the token
-  coder S2-R43 also prices. `research/progress.jsonl` it318 to it341.
+  coder S2-R43 also prices. `research/progress.jsonl` it318 to it341. The decode rate: S2-A160.
+- S2-A160 | ACCEPTED, unwired | Charter #1922 question 2, class (b)'s
+  rate: S2-A159's `BitMix` with `stretch` and `squash` read from tables.
+  Hypothesis: the five transcendental series per bit (three expert
+  stretches, the squash, the APM's stretch) are most of the walk's time,
+  and lpaq1's tables replace them within a rounding step of the same
+  cost, so train stays within 0.001 of S2-A159's keeper while the walk
+  gets several times faster. | Mechanism: three tables built once per
+  `BitMix` from `crate::logistic`'s series, so nothing reads libm
+  (ADR-0024). The stretch table holds `stretch` at each multiple of
+  1/4096, clamped like a coded probability; a probability rounds to the
+  nearest entry, lpaq1's 12 bits. The squash table holds `squash` at 1/32
+  steps over -9 to 9, 577 entries, read by linear interpolation; past
+  the range the coded probability sits on its clamp either way. The
+  APM's `stretch(p)` reads the stretch table. The index rounds by an
+  integer `min`, because a float clamp in its place read 10% slower on
+  the same walk. | Measured, main at `c038cf1`, version 22, train mean
+  against main, then each try's delta against the champion it was applied
+  to; the driver and corpus are S2-A159's, the champion is its keeper at
+  train **-0.039731**. Kept: it342 the experts' stretch by table
+  (-0.000008); it343 the squash by table (-0.000001); it344 the APM's
+  stretch by table (-0.000013). Reverted: it345 a reciprocal table for
+  the counter's `1 / (count + 1.5)` division, 0.000000 on train and no
+  faster; it would also move `cm_path`'s match-model confidence, which
+  shares `Counter` and is wired in `Method::Cm`, so a format change if it
+  had won. The keeper through `bit_mix::train_and_sealed_delta_bpb`:
+  train **-0.039753**, sealed `access_log` **-0.001268**,
+  `gradient_image` **-0.250598**; each train case within 0.0002 of S2-A159's
+  (`entropy_ladder_h6` moves most, -0.000171) and the two sealed cases within 0.00001. Speed, one session's reading
+  on a scratch clock, not the speed gate's unit and not S2-A159's
+  (that one included the pricer's per-bit `log2`; this one replays the
+  train cases' recorded literal contexts through the walk with a closure
+  that returns the bit and prices nothing): AMD EPYC 9V74, best of five
+  replays, alternated main then keeper twice, main **1,243** and 1,242 ns
+  per literal byte, keeper **345** and 346, 3.6x. S2-R43's literal
+  budget is 147 ns, read on an EPYC 9V45: the class is about 2.3x over
+  it across two CPU models. | Verdict: **accepted**, the corpus policy's,
+  train and both sealed cases falling against main and the keeper within
+  rounding of S2-A159's; unwired, so no format change and no
+  `decode_cost_delta`. Division is not the remaining cost. The 43 ns a
+  bit that remains is **unattributed**: `perf` could not open events on
+  this runner, so the f64 weight sets and APM rows (67 KB of bins), the
+  f32 and u16 `Counter` arrays, bounds checks and the walk closure are
+  suspects with no reading. | **Not measured:** the speed gate's unit
+  (#1184, #1978); Silesia's literal stream; the real coder against ideal
+  cost; the token coder S2-R43 also prices; a layout that vectorizes
+  under the loop-vectorize remark (#1930); f32 weights or a packed
+  `Counter` slot, the two cuts the class's remaining gap names first.
+  `research/progress.jsonl` it342 to it345.
