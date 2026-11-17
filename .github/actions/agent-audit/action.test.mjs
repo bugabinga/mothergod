@@ -241,10 +241,12 @@ test("a denial's reason reaches metadata.json, typed or unlisted, distinct and c
         {
           type: "result",
           result: "done",
-          permission_denials: [{ tool_name: "Edit", tool_input: {} }, { tool_name: "Edit", tool_input: {} }, {
-            tool_name: "Edit",
-            tool_input: {},
-          }, { tool_name: "mcp__github_file_ops__commit_files", tool_input: {} }],
+          permission_denials: [
+            { tool_name: "Edit", tool_input: {} },
+            { tool_name: "Edit", tool_input: {} },
+            { tool_name: "Edit", tool_input: {} },
+            { tool_name: "mcp__github_file_ops__commit_files", tool_input: {} },
+          ],
         },
       ]),
     );

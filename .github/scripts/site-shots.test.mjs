@@ -107,11 +107,10 @@ test("a changed asset captures every page, and a new page has no before", () => 
   const r = run(dir, out, ["--base", base, "--branch", `claude/x=${head}`]);
   assert.equal(r.status, 0, r.stderr);
   const rows = manifest(out);
-  assert.deepEqual([...new Set(rows.map((row) => row.page))], [
-    "site/agents.html",
-    "site/index.html",
-    "site/status.html",
-  ]);
+  assert.deepEqual(
+    [...new Set(rows.map((row) => row.page))],
+    ["site/agents.html", "site/index.html", "site/status.html"],
+  );
   const status = rows.find((row) => row.page === "site/status.html");
   assert.equal(status.before, null);
   assert.equal(readFileSync(join(out, status.after), "utf8"), "375,812 <p>status</p>");

@@ -168,10 +168,11 @@ test("the guard holding back a quarter of a seat's wakes prints; a stale wake is
     { role: "bdfl", decision: "stale" },
     { role: "reviewer", decision: "skip" },
   ];
-  const out = block([...runs("bdfl", 6, 50), ...runs("reviewer", 10, 12)], [
-    ...runs("bdfl", 6, 50),
-    ...runs("reviewer", 10, 12),
-  ], gates);
+  const out = block(
+    [...runs("bdfl", 6, 50), ...runs("reviewer", 10, 12)],
+    [...runs("bdfl", 6, 50), ...runs("reviewer", 10, 12)],
+    gates,
+  );
   assert.match(out, /^ {4}bdfl {8}runs 6 vs 6 .*skipped 2 of 8 {3}moved: skipped$/m);
   assert.match(out, /^ {4}quiet: reviewer$/m);
 });
