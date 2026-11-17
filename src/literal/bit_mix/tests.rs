@@ -187,7 +187,7 @@ fn table_squash_follows_squash_within_its_interpolation_error_and_saturates_past
         );
     }
     assert!(
-        table_squash(&table, 0.0) - 0.5 < 1e-12,
+        (table_squash(&table, 0.0) - 0.5).abs() < 1e-12,
         "squash(0) is one half"
     );
 }
