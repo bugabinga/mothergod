@@ -25,7 +25,7 @@ file; download both into one directory and run `sha256sum -c` on it
   [`docs/benchmarks/`](https://github.com/bugabinga/mothergod/tree/main/docs/benchmarks).
 - Faster when asked: against the default `-3`, on Silesia, `-2` writes 11.6%
   more bytes and encodes about 9x faster, and `-1` writes 19.5% more and
-  encodes about 15x faster.
+  encodes about 16x faster.
 - Damage is an error, never wrong bytes: a bit flip anywhere in a frame fails
   its CRC-32 before any of it is written, and truncated or hostile input gets
   an error, never a crash. The `format:` and `Trust:` entries below carry the
