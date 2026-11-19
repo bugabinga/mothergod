@@ -65,7 +65,7 @@ use crate::codec::{self, Extent, MAX_DECODED_LEN, SELECTOR_LEN};
 use crate::coder::{Decoder, Encoder};
 use crate::filters::{self, select::Candidate};
 use crate::literal::{Context, Literal, SurpriseLogisticMix, logistic_gradient_step};
-use crate::sse::LogitSse;
+use crate::sse::{LogitSse, MIN_PROBABILITY, clamp_probability};
 use crate::{Error, fan_out, logistic, try_filled_vec, try_with_capacity};
 
 /// The most bytes one [`crate::Method::Cm`] frame, and one [`decode`],
@@ -86,13 +86,13 @@ const _: () = assert!(
     "a Cm frame is a coded frame, under the coded frames' ceiling"
 );
 
-/// The reciprocal of `PROBABILITY_FLOOR`, the outer mixer's clamp, and so
+/// The reciprocal of `MIN_PROBABILITY`, the outer mixer's clamp, and so
 /// the most bytes one stream byte decodes to: [`decode`]'s bomb guard.
 ///
 /// Invariant: every node codes at a probability inside the floor, so it
-/// costs at least `-log2(1 - PROBABILITY_FLOOR)`, which exceeds
-/// `PROBABILITY_FLOOR / ln 2` bits; the coder's 16-bit quantization
-/// rounds `1 - PROBABILITY_FLOOR` exactly (`2^16` is a multiple of this
+/// costs at least `-log2(1 - MIN_PROBABILITY)`, which exceeds
+/// `MIN_PROBABILITY / ln 2` bits; the coder's 16-bit quantization
+/// rounds `1 - MIN_PROBABILITY` exactly (`2^16` is a multiple of this
 /// reciprocal), and its narrowing rounds a range of more than `2^30`, so
 /// the `1 / ln 2` margin absorbs both. A byte is 8 nodes, more than
 /// `8 / MAX_EXPANSION` bits, so `L` stream bytes hold fewer than
@@ -102,14 +102,14 @@ const _: () = assert!(
 /// output bytes, and below them [`encode`]'s one byte at least does.
 pub const MAX_EXPANSION: u32 = 4096;
 
-/// Every probability the outer mixer stretches or codes is clamped to
-/// `[PROBABILITY_FLOOR, 1 - PROBABILITY_FLOOR]`, bounding a stretch to
-/// `ln(4095)` and a node's cost to 12 bits.
 #[allow(
     clippy::cast_lossless,
     reason = "f64::from is not const; a u32 converts to f64 exactly"
 )]
-const PROBABILITY_FLOOR: f64 = 1.0 / MAX_EXPANSION as f64;
+const _: () = assert!(
+    MIN_PROBABILITY == 1.0 / MAX_EXPANSION as f64,
+    "the outer mixer's clamp is the floor `MAX_EXPANSION`'s invariant derives from"
+);
 
 /// The outer mixer's gradient step. S2-A151 kept 0.007 over 0.005 and
 /// 0.0035; with S2-A152's inputs, about twice as many, 0.005 priced lower
@@ -253,14 +253,10 @@ const APM_ORDER2_BITS: u32 = 8;
 /// model's confidence slot, `bucket * 2 + predicted bit`.
 const MATCH_STATES: usize = LENGTH_BUCKETS * 2 + 1;
 
-fn clamp(p: f64) -> f64 {
-    p.clamp(PROBABILITY_FLOOR, 1.0 - PROBABILITY_FLOOR)
-}
-
 /// [`logistic::stretch`] of `p` clamped, so its odds ratio stays normal,
 /// the precondition [`logistic::ln`] states.
 fn stretch(p: f64) -> f64 {
-    logistic::stretch(clamp(p))
+    logistic::stretch(clamp_probability(p))
 }
 
 /// `MurmurHash3`'s `fmix64` finalizer: the one hash every table index goes
@@ -821,7 +817,7 @@ impl Calibration {
     /// row in `rows`, blended `((p + 3 a0) / 4 + a1 + a2 + a3 + a4) / 5`.
     fn refine(&self, rows: [usize; 5], p: f64) -> f64 {
         let [a0, a1, a2, a3, a4] = [0, 1, 2, 3, 4].map(|i| self.tables[i].refine(rows[i], p));
-        clamp(((p + 3.0 * a0) / 4.0 + a1 + a2 + a3 + a4) / 5.0)
+        clamp_probability(((p + 3.0 * a0) / 4.0 + a1 + a2 + a3 + a4) / 5.0)
     }
 
     fn update(&mut self, rows: [usize; 5], p: f64, bit: bool) {
@@ -981,7 +977,7 @@ impl CmPath {
                 + usize::from(node >= NIBBLE_NODES);
             let w = &mut weights[set];
             let dot: f64 = w.iter().zip(&inputs).map(|(w, x)| w * x).sum();
-            let p = clamp(logistic::squash(dot));
+            let p = clamp_probability(logistic::squash(dot));
             let match_state = confidence_slot.map_or(0, |s| s + 1);
             let rows = [
                 node,

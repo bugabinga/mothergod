@@ -41,7 +41,7 @@ fn a_fresh_model_codes_the_first_decision_at_the_wire_models_probability() {
     let mut wire_mixer = SurpriseLogisticMix::new();
     let mut wire_p = Vec::new();
     wire.walk_logit_sse(Context::default(), &mut wire_mixer, |mid, p| {
-        wire_p.push(clamp(p));
+        wire_p.push(clamp_probability(p));
         usize::from(byte) >= mid
     });
 
@@ -66,7 +66,7 @@ fn every_probability_is_inside_the_floor_and_a_rerun_walks_identically() {
     assert!(
         first
             .iter()
-            .all(|p| (PROBABILITY_FLOOR..=1.0 - PROBABILITY_FLOOR).contains(p))
+            .all(|p| (MIN_PROBABILITY..=1.0 - MIN_PROBABILITY).contains(p))
     );
     assert_eq!(first, second, "no state leaks between fresh models");
 }
@@ -215,7 +215,7 @@ fn the_cheapest_possible_stream_stays_above_the_floor() {
         let mut encoder = Encoder::new();
         for node in 0..8 * len {
             let bit = node % 3 == 0;
-            encoder.encode_bit(bit, clamp(f64::from(u8::from(bit))));
+            encoder.encode_bit(bit, clamp_probability(f64::from(u8::from(bit))));
         }
         let stream = encoder.finish();
         assert!(
@@ -630,7 +630,7 @@ fn every_calibration_row_a_walk_can_name_is_in_its_table() {
         (ORDER_CLASSES - 1) * BYTE_NODES + last_node,
     ];
     let p = calibration.refine(rows, 0.3);
-    assert!((PROBABILITY_FLOOR..=1.0 - PROBABILITY_FLOOR).contains(&p));
+    assert!((MIN_PROBABILITY..=1.0 - MIN_PROBABILITY).contains(&p));
     calibration.update(rows, 0.3, true);
     assert!(
         calibration.refine(rows, 0.3) > p,
@@ -670,7 +670,7 @@ fn the_seen_order_is_the_longest_order_that_has_learned_here() {
 /// instead.
 #[test]
 fn stretch_of_a_certain_input_is_the_floors_finite_logit() {
-    let bound = logistic::stretch(1.0 - PROBABILITY_FLOOR);
+    let bound = logistic::stretch(1.0 - MIN_PROBABILITY);
     for (p, expected) in [(0.0, -bound), (-1.0, -bound), (1.0, bound), (2.0, bound)] {
         let x = stretch(p);
         assert!((x - expected).abs() < 1e-12, "stretch({p}) = {x}");

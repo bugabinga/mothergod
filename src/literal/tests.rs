@@ -379,7 +379,7 @@ fn logistic_mix_node_matches_hand_computed_stretch_and_dot() {
     let weights = [0.1, -0.2, 0.3, 0.05, 0.4, -0.15];
 
     let expected_stretched: [f64; EXPERTS] =
-        std::array::from_fn(|i| stretch(clamp_logistic_probability(p[i])));
+        std::array::from_fn(|i| stretch(clamp_probability(p[i])));
     let expected_dot: f64 = weights
         .iter()
         .zip(&expected_stretched)
@@ -391,13 +391,6 @@ fn logistic_mix_node_matches_hand_computed_stretch_and_dot() {
         assert!((got - want).abs() < 1e-12, "{stretched:?}");
     }
     assert!((dot - expected_dot).abs() < 1e-12, "{dot} {expected_dot}");
-}
-
-#[test]
-fn clamp_logistic_probability_bounds_both_tails_and_passes_the_middle() {
-    assert!((clamp_logistic_probability(0.0) - LOGISTIC_PROBABILITY_FLOOR).abs() < 1e-18);
-    assert!((clamp_logistic_probability(1.0) - (1.0 - LOGISTIC_PROBABILITY_FLOOR)).abs() < 1e-18);
-    assert!((clamp_logistic_probability(0.3) - 0.3).abs() < 1e-18);
 }
 
 #[test]
