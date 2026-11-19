@@ -29,9 +29,11 @@ would do the same per workflow, one line that drifts the day a workflow
 is added and that nothing lints (#556); this runs for every session.
 
 Upstream offers no switch. The action's credential-helper path keeps the
-URL clean but is keyed to `allowed_non_write_users`, which also widens who
-may trigger a run and scrubs the environment out of every subprocess, so
-a repository that only wants a clean remote cannot reach it. A hook is
+token out of the URL but is keyed to `allowed_non_write_users`, which also
+widens who may trigger a run and scrubs the environment out of every
+subprocess, and from 1.0.273 to `allowed_bots`, which only the seats a bot
+wakes carry, so a repository that only wants a clean remote cannot reach
+it. A hook is
 the one in-repo point that runs after the action writes the URL and
 before any tool can print it.
 

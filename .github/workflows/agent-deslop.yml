@@ -146,11 +146,14 @@ jobs:
           # Bash unrestricted, and `--tools` the set this seat's sessions
           # call, per agents/GOVERNANCE.md "Tool envelopes": Bash, Read,
           # Edit and Write across 101 runs to 2026-10-25, Skill never.
+          # The mode is said, never inherited: the action's default moved
+          # to auto in 1.0.273 (agents/GOVERNANCE.md "Tool envelopes").
           claude_args: |
             --append-system-prompt-file agents/personas/deslopper.md
             ${{ steps.guard.outputs.model_flag }}
             ${{ steps.guard.outputs.effort_flag }}
             --max-turns 400
+            --permission-mode default
             --tools "Bash,Edit,Write,Read"
             --allowedTools "Edit,Write,Bash"
 

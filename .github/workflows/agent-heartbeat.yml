@@ -255,11 +255,14 @@ jobs:
           # Read, Write, Skill, WebFetch and ToolSearch across 213 runs to
           # 2026-10-25, WebSearch never. The old allowlist of binary names
           # denied `ls` while granting `Write`, 11 median denials a run.
+          # The mode is said, never inherited: the action's default moved
+          # to auto in 1.0.273 (agents/GOVERNANCE.md "Tool envelopes").
           claude_args: |
             --append-system-prompt-file agents/personas/maintainer.md
             ${{ steps.guard.outputs.model_flag }}
             ${{ steps.guard.outputs.effort_flag }}
             --max-turns 400
+            --permission-mode default
             --tools "Bash,Edit,Write,Read,Skill,WebFetch,ToolSearch"
             --allowedTools "Edit,Write,Bash,WebFetch"
 

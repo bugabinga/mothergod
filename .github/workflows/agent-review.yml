@@ -241,6 +241,16 @@ jobs:
           # machinery (issue #57), and the job already excludes fork PRs
           # above, so no external bot can reach it regardless.
           allowed_bots: "claude,github-actions"
+          # From 1.0.273 the action denies cargo, node, python3 and the
+          # shells on a pull request whose author lacks write access,
+          # and counts every `[bot]` author as lacking it, `allowed_bots`
+          # notwithstanding. Nearly every PR here is claude[bot]'s, so
+          # the default leaves a reviewer that reads and cannot run, on
+          # a green job with one warning in its log. The boundary it
+          # would add is the one the job condition above already holds:
+          # no fork reaches this job (agents/GOVERNANCE.md "Tool
+          # envelopes").
+          restrict_untrusted_prs: false
           prompt: |
             PR to review: #$PR_NUMBER by $PR_AUTHOR, both in your environment.
             Read research/JOURNAL.md through its headings (ADR-0025) when the
@@ -347,11 +357,14 @@ jobs:
 
             Never pass a PR you doubt on losslessness or decoder safety: doubt
             means FAIL with questions.
+          # The mode is said, never inherited: the action's default moved
+          # to auto in 1.0.273 (agents/GOVERNANCE.md "Tool envelopes").
           claude_args: |
             --append-system-prompt-file agents/personas/reviewer.md
             ${{ steps.guard.outputs.model_flag }}
             ${{ steps.guard.outputs.effort_flag }}
             --max-turns 300
+            --permission-mode default
             --tools "Bash"
             --allowedTools "Bash"
 
