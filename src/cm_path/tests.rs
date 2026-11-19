@@ -146,6 +146,19 @@ fn round_trips_a_repeat_longer_than_the_verify_limit() {
     round_trips(&block.repeat(4));
 }
 
+/// Panics unless [`decode`]'s expansion floor refuses one byte from an
+/// empty stream. A test whose next call leans on the floor to refuse a
+/// multi-MiB length calls this first: with the floor disarmed that call
+/// walks the whole length, minutes at the test profile's opt-level, and
+/// the mutation run records a timeout where a failure is meant (#1621).
+fn assert_the_floor_is_armed() {
+    assert_eq!(
+        decode(&[], 1, MAX_DECODED_LEN),
+        Err(Error::Truncated),
+        "the expansion floor is disarmed"
+    );
+}
+
 #[test]
 fn decode_rejects_a_length_over_its_bound_before_any_work() {
     assert_eq!(
@@ -180,6 +193,7 @@ fn decode_caps_a_callers_bound_at_the_output_ceiling() {
             }),
             "bound {bound}"
         );
+        assert_the_floor_is_armed();
         assert_eq!(
             decode(&[], MAX_OUTPUT_LEN, bound),
             Err(Error::Truncated),
@@ -193,8 +207,8 @@ fn decode_caps_a_callers_bound_at_the_output_ceiling() {
 /// [`MAX_EXPANSION`] output bytes, before any work.
 #[test]
 fn decode_refuses_a_stream_too_short_for_its_length() {
+    assert_the_floor_is_armed();
     assert_eq!(decode(&[], 4 << 20, MAX_DECODED_LEN), Err(Error::Truncated));
-    assert_eq!(decode(&[], 1, MAX_DECODED_LEN), Err(Error::Truncated));
     assert_eq!(
         decode(&[0], MAX_EXPANSION + 1, MAX_DECODED_LEN),
         Err(Error::Truncated)
@@ -946,6 +960,7 @@ fn a_frame_output_past_the_ceiling_is_too_large() {
             max: MAX_OUTPUT_LEN
         })
     );
+    assert_the_floor_is_armed();
     assert_eq!(
         decode_payload(&header(MAX_OUTPUT_LEN), MAX_DECODED_LEN),
         Err(Error::Truncated)
