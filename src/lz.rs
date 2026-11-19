@@ -247,9 +247,9 @@ impl RepCache {
 pub(crate) struct Window {
     buf: Box<[u8]>,
     /// Total bytes ever pushed, unbounded (mirrors `decode`'s
-    /// `output.len()`): [`Self::get`] maps it back into `buf`'s fixed
-    /// capacity by distance, this value is never used as an index
-    /// directly.
+    /// `output.len()`): [`Self::push`] and [`Self::copy_back`] map it
+    /// into `buf`'s fixed capacity modulo the capacity; this value is never
+    /// used as an index directly.
     written: usize,
 }
 

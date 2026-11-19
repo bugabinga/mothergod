@@ -182,6 +182,7 @@ pub const RULES: &[(&[&str], Stage)] = &[
     (&["decode_bits"], Stage::OffsetBits),
     (&["decode_offset"], Stage::OffsetBits),
     (&["StreamingSink", "copy"], Stage::Copy),
+    (&["copy_back"], Stage::Copy),
     (&["after_copy"], Stage::Copy),
 ];
 

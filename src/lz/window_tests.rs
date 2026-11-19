@@ -1,7 +1,11 @@
 use super::*;
 
 /// `window.copy_back(distance, len)`'s emitted runs, joined.
-fn copy_back(window: &mut Window, distance: usize, len: usize) -> Result<Vec<u8>, Error> {
+fn emitted_by_copy_back(
+    window: &mut Window,
+    distance: usize,
+    len: usize,
+) -> Result<Vec<u8>, Error> {
     let mut emitted = Vec::new();
     window.copy_back(distance, len, |run| {
         emitted.extend_from_slice(run);
@@ -18,10 +22,10 @@ fn push_then_copy_back_reads_back_recent_bytes() {
     }
     assert_eq!(window.written_len(), 10);
     // The first byte pushed (0) is 10 back; the copy lands after the 9.
-    assert_eq!(copy_back(&mut window, 10, 3), Ok(vec![0, 1, 2]));
+    assert_eq!(emitted_by_copy_back(&mut window, 10, 3), Ok(vec![0, 1, 2]));
     assert_eq!(window.written_len(), 13);
     // The byte pushed most recently is the copy's last, 1 back.
-    assert_eq!(copy_back(&mut window, 1, 1), Ok(vec![2]));
+    assert_eq!(emitted_by_copy_back(&mut window, 1, 1), Ok(vec![2]));
 }
 
 #[test]
@@ -33,7 +37,10 @@ fn copy_back_matches_copy_checked_over_an_overlapping_run() {
     for byte in *b"ab" {
         window.push(byte);
     }
-    assert_eq!(copy_back(&mut window, 2, 7), Ok(b"abababa".to_vec()));
+    assert_eq!(
+        emitted_by_copy_back(&mut window, 2, 7),
+        Ok(b"abababa".to_vec())
+    );
 }
 
 #[test]
@@ -50,11 +57,15 @@ fn wraps_past_capacity_without_disturbing_still_in_range_bytes() {
         let recent: Vec<u8> = (window_len..window_len + 5)
             .map(|i| u8::try_from(i % 256).unwrap())
             .collect();
-        assert_eq!(copy_back(&mut window, 5, 5), Ok(recent), "{reach:?}");
+        assert_eq!(
+            emitted_by_copy_back(&mut window, 5, 5),
+            Ok(recent),
+            "{reach:?}"
+        );
         // The widest legal distance still reads the byte pushed that far
         // back, the 11th: the ring's capacity is exactly the reach.
         assert_eq!(
-            copy_back(&mut window, window_len, 1),
+            emitted_by_copy_back(&mut window, window_len, 1),
             Ok(vec![10]),
             "{reach:?}"
         );
@@ -84,7 +95,7 @@ fn a_ring_sized_by_the_declared_length_reads_back_its_oldest_byte() {
     for byte in *b"abcdef" {
         window.push(byte);
     }
-    assert_eq!(copy_back(&mut window, 6, 1), Ok(b"a".to_vec()));
+    assert_eq!(emitted_by_copy_back(&mut window, 6, 1), Ok(b"a".to_vec()));
 }
 
 #[test]
@@ -97,14 +108,14 @@ fn copy_back_rejects_a_distance_with_no_source_and_writes_nothing() {
     }
     for distance in [0, 7, 5] {
         assert_eq!(
-            copy_back(&mut window, distance, 1),
+            emitted_by_copy_back(&mut window, distance, 1),
             Err(Error::Corrupt),
             "distance {distance}"
         );
         assert_eq!(window.written_len(), 6, "distance {distance}");
     }
     // The capacity itself is still legal.
-    assert_eq!(copy_back(&mut window, 4, 1), Ok(b"c".to_vec()));
+    assert_eq!(emitted_by_copy_back(&mut window, 4, 1), Ok(b"c".to_vec()));
 }
 
 #[test]
