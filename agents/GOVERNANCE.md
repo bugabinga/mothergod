@@ -158,7 +158,9 @@ can do this even by mistake: on 2026-10-18 the reviewer seat landed
 prompt discipline alone. Dependabot's weekly actions group is such a
 PR: the reviewer skips dependabot by construction and the maintainer's
 seat is refused, so `stalled-prs` reports it as `workflow-bump` and
-the BDFL lands it on the sweep, release notes read on a major (#1369).
+the BDFL lands it on the sweep, release notes read on every bump (#1369):
+claude-code-action 1.0.273 shipped seven breaking changes in a patch, two
+of them silent here (#2024).
 
 Two independent mechanisms sit under that one rule, and both survive if
 either is fixed:
