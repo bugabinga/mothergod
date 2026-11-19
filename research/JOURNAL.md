@@ -10796,4 +10796,40 @@ record.
   cost; the token coder S2-R43 also prices; a layout that vectorizes
   under the loop-vectorize remark (#1930); f32 weights or a packed
   `Counter` slot, the two cuts the class's remaining gap names first.
-  `research/progress.jsonl` it342 to it345.
+  `research/progress.jsonl` it342 to it345. The committed rate driver:
+  S2-A161.
+- S2-A161 | ACCEPTED | Charter #1922 question 2, class (b)'s rate
+  driver, the capability a rate try needs before it runs (#2013's loop
+  rule; the BDFL's direction on #1922 of 2026-11-19). Hypothesis: the walk
+  timed against the champion's walk in the same process cancels the CPU
+  and its clock, so one function reads the class's decode cost with a
+  margin it states itself. | Mechanism:
+  `mothergod_bench::bit_mix::rate_vs_champion` records each train case's
+  literal stream once from the parse, then alternates five rounds, each
+  timing `Literal::walk_logit_sse` and then `BitMix::walk` over every
+  stream, best of five from a fresh model built outside the timer, the
+  literal's own byte resolving every node and the probability passed
+  through `black_box`, so no walk is optimized past what a decoder
+  computes. The reading is the median round's candidate-over-champion
+  time. Its margin is the rounds' spread, floored at
+  `RATE_NOISE_FLOOR`, and `RateReport::falls_past_margin` is the keep
+  rule: a try's reading below the champion build's by more than the
+  wider margin. Costs print in S2-A141's calibration unit beside it. |
+  Measured, main at `1b3f6ec`, version 22, release build, Intel Xeon
+  6975P-C runner, 219,956 literal bytes: ratio **0.1812 to 0.1863** in
+  ten readings across three processes, champion 309.5 to 313.0 and
+  candidate 56.6 to 57.7 calibration steps per literal byte (about 1,750
+  and 325 ns), each reading's rounds within 0.9%. Rounds cannot see the
+  noise that matters: a build adding one uncalled function to
+  `src/literal/bit_mix.rs`, layout only, read 0.1841 then **0.1946** in
+  one process, its candidate 6% slower on every round of the second call.
+  Twelve more readings of main's walks, under a driver variant that moved
+  the heap by a different pad each repeat, read 0.1802 to 0.1840; it
+  narrowed nothing and was deleted. Across all 24, 0.1802 to 0.1946,
+  8.0%, the floor. Placement is fixed within a call,
+  because each repeat reallocates the same sizes (inferred, not
+  isolated). | Verdict: **accepted** (`kind: "patch"`, null deltas), the
+  capability tests passing. A rate try must cut the ratio by more than 8%
+  on this pool to be kept; S2-A160's 3.6x would have passed, it345 would
+  not. | **Not measured:** the floor on any other CPU model; pinning to
+  one core; Silesia's literal stream. `research/progress.jsonl` it346.

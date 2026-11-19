@@ -89,7 +89,7 @@ const CALIBRATION_TABLE_LEN: u32 = 1 << 17;
 
 /// Runs per timing (calibration and each case's decode); the minimum is
 /// kept, because interference only ever adds time.
-const REPEATS: u32 = 5;
+pub(crate) const REPEATS: u32 = 5;
 
 /// [`decode_cost`] of the committed codec: calibration steps per decoded
 /// byte, measured by `baseline_gate -- speed` on an Intel Xeon Platinum 8573C
@@ -354,20 +354,30 @@ pub fn spread(kernel: Kernel, text: &str) -> Vec<CpuSpread> {
         .map(|(cpu, mut costs)| {
             costs.sort_by(f64::total_cmp);
             let runs = costs.len();
-            let median = if runs % 2 == 1 {
-                costs[runs / 2]
-            } else {
-                f64::midpoint(costs[runs / 2 - 1], costs[runs / 2])
-            };
             CpuSpread {
                 cpu: cpu.to_string(),
                 runs,
                 min: costs[0],
-                median,
+                median: median_of_sorted(&costs),
                 max: costs[runs - 1],
             }
         })
         .collect()
+}
+
+/// The median of `sorted`, ascending: the middle value of an odd count,
+/// the mean of the two middle values of an even one.
+///
+/// # Panics
+///
+/// Panics if `sorted` is empty.
+pub(crate) fn median_of_sorted(sorted: &[f64]) -> f64 {
+    let len = sorted.len();
+    if len % 2 == 1 {
+        sorted[len / 2]
+    } else {
+        f64::midpoint(sorted[len / 2 - 1], sorted[len / 2])
+    }
 }
 
 /// The [`spread`] table as text, one line per CPU after a header, columns
