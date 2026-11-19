@@ -59,8 +59,9 @@ Signatures, most specific first, at most one reported per PR:
                          workflow file (#1368), so no seat's merge command
                          fires and the PR matched nothing here while every
                          heartbeat was refused on it (#1369). Report only:
-                         the BDFL reads the bump, release notes on a major,
-                         and lands it on its sweep.
+                         the BDFL reads the bump and its release notes,
+                         a patch included (#2024), and lands it on its
+                         sweep.
     needs-bdfl           a PR whose files include `.claude/` and whose
                          next move is its author's: a required gate red
                          on its own head, or a changes-requested
@@ -408,8 +409,8 @@ def classify(pr, now, drift=None, files=None):
             f"a dependabot bump of {len(workflows)} file(s) under {WORKFLOW_PREFIX}, "
             "every required gate green; the reviewer skips dependabot and merge-pr "
             "refuses the maintainer's seat on a workflow file",
-            "the BDFL's (GOVERNANCE 'Merging'): read the bump, release notes on a "
-            f"major, then merge-pr {pr['number']} --sha {pr['headRefOid']}",
+            "the BDFL's (GOVERNANCE 'Merging'): read the bump and its release notes, "
+            f"a patch included (#2024), then merge-pr {pr['number']} --sha {pr['headRefOid']}",
         )
 
     review = by_job.get(REVIEW_CHECK)
