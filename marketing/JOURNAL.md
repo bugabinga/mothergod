@@ -121,10 +121,11 @@ those 480 came from, and none is credited to the README.
 3. **A zero-install try is the first usage path**, a browser playground
    marked "(recommended)", ahead of WASM, CLI and crate.
 4. **Strong claims name no corpus on the front page.** "Competitive
-   compression" links a benchmark file; the post says "close to" libjpeg
-   and does not describe the test images in its text. The post also says
-   the benchmarks "may have issues" and invites corrections, and answers
-   its own adoption question "No, not really."
+   compression" links a benchmark file; the post claims "performance close
+   to" libjpeg and does not describe the test images in its text. The post
+   also invites corrections ("If you see any issues with the benchmarks,
+   please let me know.") and answers its own adoption question "No, not
+   really."
 
 **Adopted: (1), in the form we can afford.** We already publish the spend:
 `/agents` prices every seat from public audit artifacts. The README's agent
