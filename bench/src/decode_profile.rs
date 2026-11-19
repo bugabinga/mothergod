@@ -721,7 +721,15 @@ mod tests {
             .count()
     }
 
+    // A lint of `RULES` against the source tree, with no platform content:
+    // one host proves it. `repo_root()` is a host path baked in at compile
+    // time, and `.github/scripts/android-runner` pushes only the test
+    // executable and the test corpora, never `src/` (issue #208).
     #[test]
+    #[cfg_attr(
+        target_os = "android",
+        ignore = "android-runner ships no src/; repo_root() is a host path (#208)"
+    )]
     fn every_rule_but_libm_names_a_function_in_src() {
         let mut sources = String::new();
         let mut dirs = vec![crate::repo_root().join("src")];
