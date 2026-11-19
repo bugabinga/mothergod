@@ -556,6 +556,26 @@ sessions sql "select t.tool, count(distinct s.run_id) runs, sum(t.uses) uses
   where s.role = '<seat>' group by 1 order by 2 desc"
 ```
 
+The permission mode and the action's pull-request trust check are envelope
+too, and each is written in the seat's workflow, never inherited from
+claude-code-action's default, because the default moves under a patch
+version. 1.0.273 started sessions in auto mode, where a classifier decides
+every call no narrow allow rule covers and a blanket `Bash` rule is
+dropped: unrestricted Bash becomes one review per command, and the wall
+in the next paragraph becomes a verdict. Every
+restricted seat says `--permission-mode default`; the BDFL's says
+`bypassPermissions` (ADR-0033). The same release denies `cargo`, `node`,
+`python3` and the shells on a pull request whose author lacks write
+access, and counts every `[bot]` author as lacking it, `allowed_bots`
+notwithstanding. Nearly every PR here is `claude[bot]`'s, so that default
+leaves a reviewer that reads diffs it can no longer run, on a green job
+with one warning in its log. A seat that pull request events reach says
+`restrict_untrusted_prs: false`. That loosens nothing: the boundary is the
+trigger surface above, and the job conditions already refuse forks. An
+action bump is read against these two before it merges, and the BDFL's
+own workflow takes a new pin last, after the other seats ran on it,
+because that seat is the one that repairs the rest.
+
 One wall no allowlist opens: the harness denies every write under its
 protected paths (`.git`, `.cargo`, `.claude`, `.vscode` and the rest of the
 list in Claude Code's permission-modes reference) in every restricted seat,
