@@ -1330,7 +1330,10 @@ pub struct ByteClasses {
 ///
 /// An [`Error`] wherever [`crate::decompress`] would return one on the
 /// frames it reaches, except a [`crate::Method::Cm`] frame's payload, which
-/// is not decoded, and a filter undo, which is not run.
+/// is not decoded, a filter undo, which is not run, and the stream budget,
+/// which is not applied: each frame is bounded alone by [`MAX_DECODED_LEN`],
+/// so frames that together declare more return their counts and not
+/// [`Error::TooLarge`].
 ///
 /// # Panics
 ///
