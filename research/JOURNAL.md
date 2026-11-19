@@ -10844,3 +10844,43 @@ record.
   would have passed, it345 would not. | **Not measured:** the floor on
   the EPYC 7763; why the 7763's ratio sits apart; pinning to one core;
   Silesia's literal stream. `research/progress.jsonl` it346.
+- S2-A162 | ACCEPTED | Charter #1922's decoder copy loop, the piece of
+  M9's route that needs no format bump (the BDFL's direction on #1922 of
+  2026-11-07, item 5): a match or rep copies by chunk, not by byte.
+  Hypothesis: the CLI's streaming copy paid, per copied byte, two modulo
+  divisions into a ring whose capacity need not be a power of two, a
+  one-byte `write_all` through the writer and one `after_copy`, so
+  copying contiguous runs lowers decode time on copy-heavy input with
+  every frame bit-identical. | Mechanism: `lz::Window::copy_back` moves
+  each run with `copy_within`, the source a whole number of periods back
+  so a distance shorter than the copy doubles its chunk, each run cut at
+  the ring's end, and hands the run to the filter undo, the writer and
+  `after_copy` in one call each; it rejects a distance past the ring's
+  capacity itself, where `Window::get` trusted its caller. `copy_checked`,
+  the whole-buffer path and `lz::replay`'s, appends by
+  `extend_from_within` in chunks that double from one period. Both hold to
+  a byte-at-a-time oracle under proptest. `decode_profile` names
+  `copy_back` in its copy row. | Measured, main at `e62ef61`, version 22,
+  release build, AMD EPYC 9V74 runner, CPU 3, Silesia `xml` and `dickens`
+  at the `bench/corpus.toml` pins, each `-3` frame the same bytes from
+  both builds. CLI decode, user plus system time, seven alternating rounds
+  main then branch: `xml` **0.621** s mean (0.61 to 0.65) against
+  **0.559** (0.55 to 0.56), 10.0% less; `dickens` 2.379 (2.34 to 2.41)
+  against 2.374 (2.34 to 2.40), no move. `decode_profile`, one run each,
+  15,537,726 bytes: main 2,948 samples, 2.95 CPU s, copy 0.07 s, libc
+  0.01, rest 0.14; branch 2,957 samples, 2.96 CPU s, copy 0.04, libc
+  0.09, rest 0.05. The three rows fall from 0.22 to 0.18 s, the copied
+  bytes' `memmove` and buffer writes now in libc and main's per-byte
+  writer calls gone from rest (inferred from the rows, not isolated);
+  the total moves inside the table's sampling noise. `baseline_gate --
+  speed`, three alternating pairs main then branch: 93.12/93.75,
+  93.93/95.18, 93.24/95.55 calibration steps per byte, fp kernel
+  58.05/57.87, 57.96/57.72, 58.04/58.16: the gate's synthetic cases
+  copy little, and the walk kernel's 1.5% on the means sits inside
+  S2-A161's 8% layout floor (inferred, not isolated). | Verdict:
+  **accepted** (`kind: "patch"`, null deltas, bytes unchanged). The copy
+  loop is no longer per byte; the copy token's decode, `Model::decode`
+  and the offset's raw bits, is untouched and is most of the copy class's
+  time on both files. | **Not measured:** the other ten Silesia files;
+  Canterbury; any CPU but this one; the whole-buffer path on Silesia.
+  `research/progress.jsonl` it347.

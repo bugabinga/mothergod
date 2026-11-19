@@ -237,6 +237,9 @@ release.
 
 ### Changed
 
+- perf: decompressing data that repeats itself takes less time, about 10%
+  on Silesia's `xml`, and none on mostly-literal text such as `dickens`;
+  every level writes the bytes it wrote (#2029).
 - perf: decoding a `-3` frame takes about 8% less time on `bench/`'s 11
   synthetic training cases, and every level writes the bytes it wrote
   (#1970).

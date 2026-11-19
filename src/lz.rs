@@ -8,6 +8,7 @@
 
 use std::num::NonZeroU32;
 
+use crate::Error;
 use crate::bittree::ALPHABET;
 use crate::codec::copy_checked;
 
@@ -240,16 +241,15 @@ impl RepCache {
 /// or the frame's declared length when that is shorter, for
 /// [`crate::codec`]'s streaming decode (bounded memory, ROADMAP M4). A
 /// byte older than that is silently overwritten, which is sound because
-/// `crate::codec::ensure_within_window` rejects any distance wider than the
-/// reach, and the streaming sink any distance past the bytes written (which
-/// never exceed the declared length), before it reaches here; the caller
-/// has already handed every byte to its sink.
+/// [`Window::copy_back`] rejects any distance past the capacity, so no read
+/// reaches an overwritten slot, and the caller has already handed every
+/// byte to its sink.
 pub(crate) struct Window {
     buf: Box<[u8]>,
     /// Total bytes ever pushed, unbounded (mirrors `decode`'s
-    /// `output.len()`): [`Self::get`] maps it back into `buf`'s fixed
-    /// capacity by distance, this value is never used as an index
-    /// directly.
+    /// `output.len()`): [`Self::push`] and [`Self::copy_back`] map it
+    /// into `buf`'s fixed capacity modulo the capacity; this value is never
+    /// used as an index directly.
     written: usize,
 }
 
@@ -286,19 +286,56 @@ impl Window {
         self.written += 1;
     }
 
-    /// The byte `distance` bytes before the current end.
+    /// Appends `len` bytes copied from `distance` bytes before the current
+    /// end, the bytes [`copy_checked`] appends to a whole buffer, handing
+    /// each contiguous run of them to `emit` as it lands, in order. A
+    /// `len` of zero emits nothing.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics (via the internal subtraction underflowing) if `distance` is
-    /// zero or exceeds [`Self::written_len`]. Callers reject both cases
-    /// ahead of time the same way [`copy_checked`] does with
-    /// `output.len().checked_sub(distance)`, so this is never reached with
-    /// adversarial input, only a caller bug; `Window` cannot itself tell a
-    /// stale, overwritten slot from a real one, so it does not attempt a
-    /// second, redundant bounds check the caller has already done.
-    pub(crate) fn get(&self, distance: usize) -> u8 {
-        self.buf[(self.written - distance) % self.buf.len()]
+    /// [`Error::Corrupt`], with nothing written, when `distance` is zero,
+    /// past [`Self::written_len`], or past the ring's capacity, where the
+    /// source byte is overwritten; otherwise the first error `emit`
+    /// returns, after the run it was handed has landed.
+    pub(crate) fn copy_back<E: From<Error>>(
+        &mut self,
+        distance: usize,
+        len: usize,
+        mut emit: impl FnMut(&[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let capacity = self.buf.len();
+        // Past here `1 <= distance <= capacity`, so `back` below is at
+        // least `distance` and every chunk at least one byte: the loop
+        // ends. A distance past the capacity would round `back` to zero
+        // and spin.
+        if distance == 0 || distance > self.written || distance > capacity {
+            return Err(Error::Corrupt.into());
+        }
+        let mut copied = 0;
+        while copied < len {
+            // Everything from `distance` before the copy's start repeats
+            // with period `distance`, so a source `back` bytes back, a
+            // multiple of the period, holds the byte one period back does.
+            // `back` stays within the run (at most `distance + copied`) and
+            // within the ring (at most `capacity`), and the chunk within
+            // `back`, so every source byte was written before this chunk;
+            // a destination slot that is also a source slot is read before
+            // it is written, because `copy_within` moves as `memmove` does.
+            // The chunk also stops at the ring's end, source and target
+            // both, so the slices below stay in bounds.
+            let back = (distance + copied).min(capacity) / distance * distance;
+            let source = (self.written - back) % capacity;
+            let target = self.written % capacity;
+            let chunk = (len - copied)
+                .min(back)
+                .min(capacity - source)
+                .min(capacity - target);
+            self.buf.copy_within(source..source + chunk, target);
+            self.written += chunk;
+            copied += chunk;
+            emit(&self.buf[target..target + chunk])?;
+        }
+        Ok(())
     }
 }
 

@@ -1045,9 +1045,10 @@ fn ensure_within_window(distance: NonZeroU32, reach: Reach) -> Result<(), Error>
 }
 
 /// Copies `len` bytes to the end of `output` from `distance` bytes before
-/// its current end, one byte at a time so a distance shorter than `len` (a
-/// run, not a disjoint repeat) still reproduces the source correctly, each
-/// copied byte visible to later reads in the same call.
+/// its current end, the bytes `len` pushes of `output[output.len() -
+/// distance]` would append: a distance shorter than `len` (a run, not a
+/// disjoint repeat) repeats the source, each copied byte visible to later
+/// reads in the same call. It appends by chunk, not by byte.
 ///
 /// Returns [`Error::Corrupt`], never panics, when `distance` reaches before
 /// the start of `output`: this runs on a token stream decoded from an
@@ -1061,15 +1062,17 @@ pub(crate) fn copy_checked(
 ) -> Result<(), Error> {
     let distance = distance.get() as usize;
     let start = output.len().checked_sub(distance).ok_or(Error::Corrupt)?;
-    for k in 0..len as usize {
-        // start + k < output.len() at every iteration: start < output.len()
-        // going in (checked_sub succeeded against a distance >= 1), and
-        // output grows by exactly one element per iteration from there, so
-        // the index this iteration reads is always already written,
-        // either from before this call or by an earlier iteration of it
-        // (the overlapping-run case).
-        let byte = output[start + k];
-        output.push(byte);
+    let mut remaining = len as usize;
+    while remaining > 0 {
+        // `output[start..]` repeats with period `distance`, and every chunk
+        // before this one appended a whole number of periods: the first
+        // `distance` bytes, then each chunk as long as everything from
+        // `start` on, doubling. So the bytes from `start` are the ones a
+        // byte-at-a-time copy would read next, and none of them is past
+        // the end (`start + chunk <= output.len()`).
+        let chunk = remaining.min(output.len() - start);
+        output.extend_from_within(start..start + chunk);
+        remaining -= chunk;
     }
     Ok(())
 }
@@ -1480,23 +1483,31 @@ enum StreamUndo {
     Bcj(filters::bcj::Undo),
 }
 
+/// Raw bytes [`StreamUndo::apply`] undoes a [`StreamUndo::Delta`] run into
+/// before each write.
+const UNDO_CHUNK: usize = 256;
+
 impl StreamUndo {
-    /// Undoes one more filtered byte, in stream order, writing whatever
-    /// bytes that resolves to `writer` immediately (zero for
-    /// [`Self::Bcj`] while it is still buffering a candidate instruction,
-    /// exactly one otherwise).
-    fn apply<W: std::io::Write>(
-        &mut self,
-        filtered_byte: u8,
-        writer: &mut W,
-    ) -> std::io::Result<()> {
+    /// Undoes `filtered`, the next filtered bytes in stream order, writing
+    /// whatever they resolve to `writer` immediately (for [`Self::Bcj`],
+    /// fewer while it is still buffering a candidate instruction; exactly
+    /// `filtered.len()` otherwise).
+    fn apply<W: std::io::Write>(&mut self, filtered: &[u8], writer: &mut W) -> std::io::Result<()> {
         match self {
-            Self::Identity => writer.write_all(std::slice::from_ref(&filtered_byte)),
+            Self::Identity => writer.write_all(filtered),
             Self::Delta(undo) => {
-                let raw = undo.apply(filtered_byte);
-                writer.write_all(std::slice::from_ref(&raw))
+                let mut raw = [0; UNDO_CHUNK];
+                for chunk in filtered.chunks(UNDO_CHUNK) {
+                    for (out, &byte) in raw.iter_mut().zip(chunk) {
+                        *out = undo.apply(byte);
+                    }
+                    writer.write_all(&raw[..chunk.len()])?;
+                }
+                Ok(())
             }
-            Self::Bcj(undo) => writer.write_all(undo.apply(filtered_byte).as_slice()),
+            Self::Bcj(undo) => filtered
+                .iter()
+                .try_for_each(|&byte| writer.write_all(undo.apply(byte).as_slice())),
         }
     }
 
@@ -1544,37 +1555,31 @@ impl<W: std::io::Write> DecodeSink for StreamingSink<'_, W> {
             .literal
             .decode_logit_sse(ac, context, &mut models.logit_sse);
         self.window.push(byte);
-        self.undo.apply(byte, self.writer)?;
+        self.undo.apply(std::slice::from_ref(&byte), self.writer)?;
         Ok(byte)
     }
 
     /// `context` folds over the *filtered* bytes `window` holds, never
-    /// `undo`'s output. One [`Context::after_copy`] per byte equals
-    /// [`VecSink::copy`]'s one call over the whole run, which is not
-    /// available here: `window`'s ring buffer does not hold the run
-    /// contiguously when it wraps. A zero-length copy still validates
-    /// `distance` against what has been written ([`copy_checked`]'s
-    /// rejection) and still marks the context as after a copy.
+    /// `undo`'s output. One [`Context::after_copy`] per run
+    /// [`lz::Window::copy_back`] emits equals [`VecSink::copy`]'s one call
+    /// over the whole copy, which is not available here: `window`'s ring
+    /// buffer does not hold the copy contiguously when it wraps. A
+    /// zero-length copy still validates `distance` against what has been
+    /// written ([`copy_checked`]'s rejection) and still marks the context
+    /// as after a copy.
     fn copy(
         &mut self,
         len: u32,
         distance: NonZeroU32,
-        mut context: Context,
+        context: Context,
     ) -> Result<Context, crate::WriteError> {
-        let distance = distance.get() as usize;
+        let mut context = context.after_copy(&[]);
+        let (undo, writer) = (&mut *self.undo, &mut *self.writer);
         self.window
-            .written_len()
-            .checked_sub(distance)
-            .ok_or(Error::Corrupt)?;
-        if len == 0 {
-            return Ok(context.after_copy(&[]));
-        }
-        for _ in 0..len {
-            let byte = self.window.get(distance);
-            self.window.push(byte);
-            self.undo.apply(byte, self.writer)?;
-            context = context.after_copy(std::slice::from_ref(&byte));
-        }
+            .copy_back(distance.get() as usize, len as usize, |run| {
+                context = context.after_copy(run);
+                undo.apply(run, writer).map_err(crate::WriteError::from)
+            })?;
         Ok(context)
     }
 }
