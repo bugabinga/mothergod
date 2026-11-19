@@ -10796,4 +10796,51 @@ record.
   cost; the token coder S2-R43 also prices; a layout that vectorizes
   under the loop-vectorize remark (#1930); f32 weights or a packed
   `Counter` slot, the two cuts the class's remaining gap names first.
-  `research/progress.jsonl` it342 to it345.
+  `research/progress.jsonl` it342 to it345. The committed rate driver:
+  S2-A161.
+- S2-A161 | ACCEPTED | Charter #1922 question 2, class (b)'s rate
+  driver, the capability a rate try needs before it runs (#2013's loop
+  rule; the BDFL's direction on #1922 of 2026-11-19). Hypothesis: the walk
+  timed against the champion's walk in the same process cancels the
+  clock and the machine's load, so one function reads the class's decode
+  cost with a margin it states itself, on the CPU model it names. |
+  Mechanism: `mothergod_bench::bit_mix::rate_vs_champion` records each
+  train case's literal stream once from the parse, then alternates five
+  rounds, each timing `Literal::walk_logit_sse` and then `BitMix::walk`
+  over every stream, best of five from a fresh model built outside the
+  timer, the literal's own byte resolving every node and the probability
+  passed through `black_box`, so no walk is optimized past what a decoder
+  computes. The reading is the median round's candidate-over-champion
+  time, printed with the `/proc/cpuinfo` model it ran on. Its margin is
+  the rounds' spread, floored at `RATE_NOISE_FLOOR`, and
+  `RateReport::falls_past_margin` is the keep rule: a try's reading below
+  the champion build's by more than the wider margin, and no verdict
+  (`None`) unless both readings name one CPU model. Costs print in
+  S2-A141's calibration unit beside it. | Measured, main at `1b3f6ec`,
+  version 22, release build, 219,956 literal bytes. Intel Xeon 6975P-C:
+  ratio **0.1812 to 0.1863** in ten readings across three processes,
+  champion 309.5 to 313.0 and candidate 56.6 to 57.7 calibration steps
+  per literal byte (about 1,750 and 325 ns), each reading's rounds within
+  0.9%. AMD EPYC 9V74: 0.1814 to 0.1827 in four readings across two
+  processes. AMD EPYC 7763, the reviewer's run on #2026: 0.2237 to
+  0.2257 in four readings. **The ratio does not cancel the CPU model**:
+  the 7763 reads about 21% above the other two, past any margin, so the
+  keep rule compares two readings on one model only. Rounds cannot see
+  the noise that matters: a build adding one uncalled function to
+  `src/literal/bit_mix.rs`, layout only, read 0.1841 then **0.1946** on
+  the Xeon in one process, its candidate 6% slower on every round of the
+  second call; a different uncalled function read 0.1796 to 0.1818 on the
+  9V74 in four readings, within 1.7% of that model's main. The Xeon's
+  reproducible readings span 0.1812 to 0.1946, 7.4%; the floor is that,
+  rounded up to 8%. It is a lower bound from two layout perturbations,
+  one per model, and a third may move further. A driver variant that
+  moved the heap by a different pad each repeat read 0.1802 to 0.1840 in
+  twelve Xeon readings, narrowed nothing and was deleted; those readings
+  are not reproducible from the tree and the floor does not rest on them.
+  Placement is fixed within a call, because each repeat reallocates the
+  same sizes (inferred, not isolated). | Verdict: **accepted** (`kind:
+  "patch"`, null deltas), the capability tests passing. A rate try must
+  cut the ratio by more than 8% on one model to be kept; S2-A160's 3.6x
+  would have passed, it345 would not. | **Not measured:** the floor on
+  the EPYC 7763; why the 7763's ratio sits apart; pinning to one core;
+  Silesia's literal stream. `research/progress.jsonl` it346.
