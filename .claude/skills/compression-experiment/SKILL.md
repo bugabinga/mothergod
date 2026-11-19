@@ -161,6 +161,21 @@ Per try:
    (`research/README.md`): a line is written once, with a verdict the
    schema admits, never turned later.
 
+A charter that names a coder class (ADR-0062; #1922's question 2 is one)
+changes which try is kept and never the verdict (#1990):
+
+- The class's first try is its entry point, kept whatever its delta
+  against main: a class that enters above main has nothing else to climb
+  from, and step 3 read literally reverted all eight tries of S2-R44.
+  After it the champion is the class's best-so-far.
+- A rate try, one whose hypothesis is decode cost, names its train bound
+  in step 1 and is kept when the cost falls inside that bound (S2-A160's
+  tries: "within 0.001 of the series").
+- Step 5 stands as written: the keeper whole, once, against main, under
+  the corpus policy. The PR body and the journal entry give the keeper's
+  train and sealed deltas against main and say the champion was the
+  class's.
+
 No try starts past 60% of the heartbeat's `timeout-minutes` from the job's
 start (preflight step 4); that mark or the idea's last try ends the loop,
 and the session lands:
