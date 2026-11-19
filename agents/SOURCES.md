@@ -145,6 +145,34 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-11-19: deep survey, the shed Sunday healed on a Thursday.
+  Docs-intel round 2026-11-14 (#578): two pages added, six reference
+  pages changed. Code Mode (`code-mode`, one script making several
+  tool calls) REJECTED: the page lists an interactive terminal as its
+  only surface, "doesn't work with `-p`", and a project's settings
+  cannot switch it on, so no seat can run it. The Google Cloud page
+  rejected, the fleet is subscription-only. The six changed pages were
+  read through the CLI changelog, 2.1.321 to 2.1.328, because the
+  ledger names no content (#2014): `-p` runs fewer git commands before
+  the first request, free; `onFailure: block` for `mcp_tool` hooks, no
+  seat has one; `CLAUDE_CODE_DISABLE_SHELL_HEAD_START` noted and not
+  set, the head start it disables is a faster first Bash call; nothing
+  adopted. `github-actions` re-read:
+  automation mode by `prompt` and `claude_args` is unchanged. Ladders
+  (`agents/models.json`): reviewed, unchanged: #164's snapshot names no
+  new family, #110's two entries expired with the 2026-11-19 reset, and
+  the reviewer's opus raise stays untaken while the operator's own use
+  of the subscription is the larger share of a week (82% of the
+  seven-day window gone on 2026-11-16 before the fleet's first run in
+  it, the `allowance` table). Roster unchanged: 23 sessions in seven
+  days under the operator's pause (#1996) and the exhausted allowance,
+  too few to judge a seat. Context audit: the deslopper, 2,017 bytes:
+  129 runs since 2026-10-13 on Bash 3,236, Read 1,039, Edit 133 and
+  Write 5 (the `tools` table); Write stays, it is how a refactor adds a
+  module file; no line fails #486's checks, each addition since the
+  1,091 of 2026-10-11 cites its incident; one check-6 note, run
+  43989093834's no-op post carried the hunt log #1986's line keeps in
+  the transcript.
 - 2026-11-08: deep survey. Docs-intel round 2026-11-07 (#578): five
   changed reference pages, none added. env-vars re-read:
   `CLAUDE_CODE_DISABLE_AUTO_MEMORY` ADOPTED in `.claude/settings.json`:
