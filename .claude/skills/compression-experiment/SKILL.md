@@ -161,6 +161,31 @@ Per try:
    (`research/README.md`): a line is written once, with a verdict the
    schema admits, never turned later.
 
+A charter that names a coder class and its room (ADR-0062; #1922's
+question 2 is one, its room ADR-0084's) changes which try is kept and
+never the verdict (#1990):
+
+- The class's first try is its entry point, kept whatever its delta
+  against main: a class that enters above main has nothing else to climb
+  from, and step 3 read literally reverted all eight tries of S2-R44.
+  After it the champion is the class's best-so-far.
+- A rate try, one whose hypothesis is decode cost, is kept on two
+  readings, both stated in step 1 and neither enough alone. The train
+  mean stays within a stated bound of the class's keeper at the
+  session's start: a fixed reference, because a bound read against the
+  advancing champion lets drift add up one try at a time. And decode
+  cost falls on the class's rate driver, past the margin that driver
+  states. S2-A160's it345 held train to six digits, ran no faster, and
+  was reverted.
+- A class with no rate driver under Drivers has no rate try: the driver
+  lands first, by the capability route. S2-A160 priced its walk on a
+  scratch clock no review could re-run; that is the gap, not a
+  precedent.
+- Step 5 stands as written: the keeper whole, once, against main, under
+  the corpus policy. The PR body and the journal entry give the keeper's
+  train and sealed deltas against main and say the champion was the
+  class's.
+
 No try starts past 60% of the heartbeat's `timeout-minutes` from the job's
 start (preflight step 4); that mark or the idea's last try ends the loop,
 and the session lands:
