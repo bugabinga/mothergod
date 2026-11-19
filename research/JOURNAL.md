@@ -10616,21 +10616,34 @@ record.
   class S2-R43 found to fit the bar's per-byte work also fits rung 1's
   room, so its literal cost against the default level's stays near zero
   on train. | Mechanism: after Pavlov's LZMA literal coder (LZMA SDK,
-  `lzma-specification.txt`): 11-bit probabilities starting at one half,
-  updated `p += (target - p) >> shift`, keyed by `prev1 >> (8 - lc)` and
-  `position mod 2^lp`, 256 nodes per key. A scratch caller priced it
-  through `literal_pairing` against `Literal::walk_logit_sse` under a
-  fresh `SurpriseLogisticMix` per case, both sides ideal cost, and was
-  deleted with this verdict. LZMA's matched-literal mode is absent,
-  because `literal_pairing`'s `Context` carries no byte at rep0. |
+  `lzma-specification.txt`), keyed by `prev1 >> (8 - lc)` and
+  `position mod 2^lp`, 256 nodes per key. Each node holds `p`, the
+  integer 11-bit probability of a 0 bit, starting at 1024. A shift try
+  updates `p += (target - p) >> shift`, `>>` arithmetic (rounding toward
+  minus infinity), target 2048 after a 0 and 0 after a 1, then clamps
+  `p` to `[31, 2017]`, LZMA's own fixed points at shift 5: the floor
+  binds at every shift, the ceiling at shift 4 alone. A count try
+  updates `p += (target - p) / (min(n, 30) + c)`, the quotient truncated
+  toward zero, `n` the node's earlier updates, same clamp. A bit costs
+  `-log2(p / 2048)` as a 0 and `-log2(1 - p / 2048)` as a 1, with no
+  cost clamp. LZMA's own `p -= p >> 5` rounds the step after a 1 toward
+  zero instead and reads it310 +0.177761, not the figure below (issue
+  #1991). A scratch caller priced it through `literal_pairing` against
+  `Literal::walk_logit_sse` under a fresh `SurpriseLogisticMix` per
+  case, both sides ideal cost, and was deleted with this verdict; the
+  rule above was recovered after the fact by reproducing every figure
+  below to six digits at `a125fa5`. LZMA's matched-literal mode is
+  absent, because `literal_pairing`'s `Context` carries no byte at rep0. |
   Measured, main at `ee8b1ac`, version 22, train mean against main, then
   the try's delta against the champion it was applied to: it310 lc 3, lp
   0, shift 5, xz's default, **+0.178734**, kept as the class's entry
   point; it311 lc 8, +0.240245 (+0.061511), reverted; it312 shift 4,
   +0.201495 (+0.022761), reverted; it313 a count-based rate 1/(n + 1.5)
-  down to 1/32, +0.195653 (+0.016919), reverted; it314 the same at
-  1/(n + 2), +0.187271 (+0.008537), reverted; it315 lc 8 at it314's
-  rate, +0.247250 (+0.068516), reverted; it316 lp 2, **+0.162900**
+  down to 1/31.5, `n` capped at 30, +0.195653 (+0.016919), reverted
+  (its `progress.jsonl` line says 1/32; the 1/32 floor reads +0.195340);
+  it314 the same at 1/(n + 2), +0.187271 (+0.008537), reverted; it315
+  lc 8 at it314's rate, +0.247250 (+0.068516), reverted; it316 lp 2,
+  **+0.162900**
   (-0.015834), kept; it317 lc 0, lp 2, +0.199894 (+0.036994), reverted.
   The keeper, lc 3, lp 2, shift 5, through
   `literal_pairing::train_and_sealed_delta_bpb`: train +0.162900, sealed
