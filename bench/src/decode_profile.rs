@@ -416,8 +416,8 @@ pub fn format_table(tally: &Tally) -> String {
 /// `tally`'s time per [`TokenClass`] over the tokens `classes` counted, as
 /// a markdown table: each class's stages by [`Stage::class`], its bytes
 /// and tokens, and nanoseconds per byte and per token, `-` where a class
-/// has none. A closing line names the time charged to neither class and
-/// the bytes no token wrote.
+/// has none. Closing lines name the time charged to neither class, the
+/// bytes no token wrote, and the literal flags the copy row's time holds.
 #[must_use]
 pub fn format_classes(tally: &Tally, classes: &ByteClasses) -> String {
     let charged = |class: Option<TokenClass>| -> u64 {
@@ -462,6 +462,19 @@ pub fn format_classes(tally: &Tally, classes: &ByteClasses) -> String {
         "\nNeither class: {:.2} s of libc, kernel and rest. Bytes in frames with no tokens: {}.",
         seconds(charged(None)),
         classes.untokened
+    )
+    .expect("writing to a String never fails");
+    // The line below is true only while the stage that decodes every
+    // token's flag is charged to the copy row; moving it breaks the build
+    // here rather than leaving the line false.
+    const {
+        assert!(matches!(Stage::TokenModel.class(), Some(TokenClass::Copy)));
+    }
+    writeln!(
+        out,
+        "The copy row's time includes the token flag each of the {} literals decodes, \
+         so its ns per token is not a per-copy price.",
+        classes.literals
     )
     .expect("writing to a String never fails");
     out
@@ -708,6 +721,13 @@ mod tests {
             "Neither class: 0.00 s of libc, kernel and rest. Bytes in frames with no tokens: 7.",
             "{table}"
         );
+        assert_eq!(
+            rows[6],
+            "The copy row's time includes the token flag each of the 2000 literals decodes, \
+             so its ns per token is not a per-copy price.",
+            "{table}"
+        );
+        assert_eq!(rows.len(), 7, "{table}");
         // A class with no tokens prints a dash, not a division by zero.
         let none = format_classes(&tally, &ByteClasses::default());
         assert!(none.contains("| copy | 0 | 0 | 0.00 | - | - |"), "{none}");
