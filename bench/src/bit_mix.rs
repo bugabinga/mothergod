@@ -13,6 +13,7 @@
 use crate::baseline;
 use crate::cm_path::cost_bits;
 use crate::literal_pairing::{self, PairingReport, literal_replay};
+use crate::reference::cpu_model;
 use crate::speed::{self, Kernel, median_of_sorted};
 use mothergod::literal::bit_mix::BitMix;
 use mothergod::literal::{Context, Literal, SurpriseLogisticMix};
@@ -156,12 +157,14 @@ fn walk_seconds<M: RateWalk>(streams: &[Vec<(Context, u8)>]) -> f64 {
 const ROUNDS: NonZeroUsize = NonZeroUsize::new(5).expect("nonzero");
 
 /// The least margin a [`RateReport`] states: how far [`RateReport::ratio`]
-/// moved across same-code readings, largest over smallest less one, a
-/// spread one run's rounds cannot see. Its largest part came from a build
-/// that moved code layout and nothing either walk runs, while that call's
-/// rounds agreed with each other (`research/JOURNAL.md` S2-A161, one CPU
-/// model). A try changes layout as that build did, so a fall inside this
-/// floor is no reading.
+/// moved across same-code readings on one CPU model, largest over smallest
+/// less one, a spread one run's rounds cannot see. Its largest part, 7.4%
+/// on a Xeon 6975P-C, came from a build that moved code layout and nothing
+/// either walk runs, while that call's rounds agreed with each other
+/// (`research/JOURNAL.md` S2-A161). A try changes layout as that build
+/// did, so a fall inside this floor is no reading. It is a lower bound:
+/// the largest of two layout perturbations, one per model, and a third may
+/// move further.
 pub const RATE_NOISE_FLOOR: f64 = 0.08;
 
 /// One round of [`rate_over`]: each walk's summed seconds, the champion's
@@ -183,17 +186,24 @@ impl RateRound {
 }
 
 /// The rate driver's reading: both walks' time over the same literal
-/// streams, in alternating rounds, beside one calibration run.
+/// streams, in alternating rounds, beside one calibration run, on the CPU
+/// model it names.
 ///
 /// The keep rule reads [`Self::ratio`], the candidate's time over the
 /// champion's in the same round: both walk the same contexts on the same
-/// core moments apart, so the CPU model and its clock cancel, where the
-/// calibration kernel spans up to a third within one model (issue #1184).
-/// What does not cancel is code layout and memory placement, fixed within
-/// a process and drawn afresh by each build and run: [`RATE_NOISE_FLOOR`]
-/// prices it.
+/// core moments apart, so the clock and the machine's load cancel, where
+/// the calibration kernel spans up to a third within one model (issue
+/// #1184). The CPU model does not cancel: the two walks stress the core
+/// differently, so the ratio moves with the microarchitecture, and two
+/// readings compare only on one model (`research/JOURNAL.md` S2-A161).
+/// Code layout and memory placement do not cancel either, fixed within a
+/// process and drawn afresh by each build and run: [`RATE_NOISE_FLOOR`]
+/// prices them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RateReport {
+    /// [`cpu_model`] where the rounds ran; `None` when unreadable, and an
+    /// unread model matches no other.
+    pub cpu: Option<String>,
     /// Literal bytes per walk, every stream's summed.
     pub literal_bytes: usize,
     /// [`speed::calibration_seconds`], read once before the rounds.
@@ -236,10 +246,15 @@ impl RateReport {
     /// Whether this reading's ratio falls below `before`'s by more than
     /// the larger of the two margins: a rate try's decode-cost reading,
     /// `before` read on the champion's build and `self` on the try's.
+    /// `None` unless both name the same CPU model, because a ratio moves
+    /// between models by more than any margin (`research/JOURNAL.md`
+    /// S2-A161), so a cross-model verdict would be the CPU's, not the
+    /// try's.
     #[must_use]
-    pub fn falls_past_margin(&self, before: &Self) -> bool {
+    pub fn falls_past_margin(&self, before: &Self) -> Option<bool> {
+        let same_cpu = self.cpu.is_some() && self.cpu == before.cpu;
         let margin = self.margin().max(before.margin());
-        self.ratio() < before.ratio() * (1.0 - margin)
+        same_cpu.then(|| self.ratio() < before.ratio() * (1.0 - margin))
     }
 
     /// A walk's median seconds in [`Kernel::Walk`] steps per literal byte,
@@ -279,7 +294,8 @@ impl fmt::Display for RateReport {
         let bytes = self.literal_bytes as f64;
         writeln!(
             f,
-            "bit_mix rate: {} literal bytes, ns per literal byte",
+            "bit_mix rate on {}: {} literal bytes, ns per literal byte",
+            self.cpu.as_deref().unwrap_or("unknown CPU"),
             self.literal_bytes
         )?;
         for round in &self.rounds {
@@ -315,6 +331,7 @@ pub fn rate_over(streams: &[Vec<(Context, u8)>], rounds: NonZeroUsize) -> RateRe
         })
         .collect();
     RateReport {
+        cpu: cpu_model(),
         literal_bytes: streams.iter().map(Vec::len).sum(),
         calibration_seconds,
         rounds,
@@ -323,8 +340,8 @@ pub fn rate_over(streams: &[Vec<(Context, u8)>], rounds: NonZeroUsize) -> RateRe
 
 /// The class's rate driver: [`rate_over`] the eleven train cases' literal
 /// streams in five rounds. Read it in a release build, once on the
-/// champion's build and once on the try's, and keep the try when
-/// [`RateReport::falls_past_margin`] holds.
+/// champion's build and once on the try's, on one CPU model, and keep the
+/// try when [`RateReport::falls_past_margin`] answers `Some(true)`.
 #[must_use]
 pub fn rate_vs_champion() -> RateReport {
     let streams: Vec<_> = baseline::cases()
@@ -436,10 +453,12 @@ mod tests {
         assert!(report.ratio().is_finite() && report.ratio() > 0.0);
     }
 
-    /// A report of 1,000 literal bytes, a calibration of one microsecond a
-    /// step, and rounds of a champion at one second against `candidates`.
+    /// A report on one named CPU model, of 1,000 literal bytes, a
+    /// calibration of one microsecond a step, and rounds of a champion at
+    /// one second against `candidates`.
     fn report(candidates: &[f64]) -> RateReport {
         RateReport {
+            cpu: Some("Xeon 6975P-C".to_string()),
             literal_bytes: 1_000,
             calibration_seconds: 4.0,
             rounds: candidates
@@ -469,16 +488,27 @@ mod tests {
     #[test]
     fn a_try_is_faster_only_past_the_wider_of_both_margins() {
         let before = report(&[0.31, 0.29, 0.30]);
-        assert!(report(&[0.25, 0.26, 0.255]).falls_past_margin(&before));
-        assert!(
-            !report(&[0.29, 0.29, 0.29]).falls_past_margin(&before),
+        assert_eq!(
+            report(&[0.25, 0.26, 0.255]).falls_past_margin(&before),
+            Some(true)
+        );
+        assert_eq!(
+            report(&[0.29, 0.29, 0.29]).falls_past_margin(&before),
+            Some(false),
             "faster, but inside before's margin"
         );
-        assert!(!report(&[0.35, 0.35, 0.35]).falls_past_margin(&before));
+        assert_eq!(
+            report(&[0.35, 0.35, 0.35]).falls_past_margin(&before),
+            Some(false)
+        );
         let steady = report(&[0.30, 0.30, 0.30]);
-        assert!(report(&[0.25, 0.25, 0.25]).falls_past_margin(&steady));
-        assert!(
-            !report(&[0.20, 0.25, 0.28]).falls_past_margin(&steady),
+        assert_eq!(
+            report(&[0.25, 0.25, 0.25]).falls_past_margin(&steady),
+            Some(true)
+        );
+        assert_eq!(
+            report(&[0.20, 0.25, 0.28]).falls_past_margin(&steady),
+            Some(false),
             "faster, but inside the try's own margin"
         );
     }
@@ -486,11 +516,34 @@ mod tests {
     #[test]
     fn a_fall_inside_the_noise_floor_is_kept_by_neither_spread() {
         let steady = report(&[0.30, 0.30, 0.30]);
-        assert!(
-            !report(&[0.28, 0.28, 0.28]).falls_past_margin(&steady),
+        assert_eq!(
+            report(&[0.28, 0.28, 0.28]).falls_past_margin(&steady),
+            Some(false),
             "6.7% faster with no spread on either side"
         );
-        assert!(report(&[0.27, 0.27, 0.27]).falls_past_margin(&steady));
+        assert_eq!(
+            report(&[0.27, 0.27, 0.27]).falls_past_margin(&steady),
+            Some(true)
+        );
+    }
+
+    /// The reviewer's EPYC 7763 read about 21% above the Xeon 6975P-C on
+    /// the same code (`research/JOURNAL.md` S2-A161), so a fall that
+    /// clears every margin is still no verdict across models.
+    #[test]
+    fn readings_on_two_cpu_models_or_an_unread_one_give_no_verdict() {
+        let before = report(&[0.30, 0.30, 0.30]);
+        let mut other_model = report(&[0.20, 0.20, 0.20]);
+        other_model.cpu = Some("AMD EPYC 7763 64-Core Processor".to_string());
+        assert_eq!(other_model.falls_past_margin(&before), None);
+        assert_eq!(before.falls_past_margin(&other_model), None);
+
+        let mut unread = report(&[0.20, 0.20, 0.20]);
+        unread.cpu = None;
+        let mut unread_before = before.clone();
+        unread_before.cpu = None;
+        assert_eq!(unread.falls_past_margin(&unread_before), None);
+        assert_eq!(unread.falls_past_margin(&before), None);
     }
 
     #[test]
@@ -505,7 +558,7 @@ mod tests {
     fn a_report_prints_every_round_then_the_reading() {
         assert_eq!(
             report(&[0.5, 0.25]).to_string(),
-            "bit_mix rate: 1000 literal bytes, ns per literal byte\n  \
+            "bit_mix rate on Xeon 6975P-C: 1000 literal bytes, ns per literal byte\n  \
              champion 1000000.0  candidate 500000.0  ratio 0.5000\n  \
              champion 1000000.0  candidate 250000.0  ratio 0.2500\n\
              ratio 0.3750, spread 100.0%, margin 100.0%; calibration steps per literal byte: \
