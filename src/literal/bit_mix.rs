@@ -27,8 +27,8 @@
 //! run is bit-identical.
 
 use super::{
-    ALIGN_BANKS, Context, WEIGHT_CONTEXTS, align_key, clamp_logistic_probability,
-    logistic_gradient_step, weight_index,
+    ALIGN_BANKS, Context, WEIGHT_CONTEXTS, align_key, clamp_probability, logistic_gradient_step,
+    weight_index,
 };
 use crate::bittree::{self, SSE_CONTEXTS};
 use crate::cm_path::Counter;
@@ -88,7 +88,7 @@ fn fresh_stretch_table() -> Vec<f32> {
                 clippy::cast_possible_truncation,
                 reason = "narrowing a stretch to f32"
             )]
-            let value = stretch(clamp_logistic_probability(p)) as f32;
+            let value = stretch(clamp_probability(p)) as f32;
             value
         })
         .collect()
@@ -228,7 +228,7 @@ impl BitMix {
     /// the next node. Returns the landed byte.
     ///
     /// The coded probability lies in
-    /// [`clamp_logistic_probability`]'s range, so a node costs at most 12
+    /// [`clamp_probability`]'s range, so a node costs at most 12
     /// bits.
     pub fn walk(&mut self, context: Context, mut code_bit: impl FnMut(usize, f64) -> bool) -> u8 {
         let bases = [
@@ -253,7 +253,7 @@ impl BitMix {
             for (w, s) in weights.iter().zip(&stretched) {
                 dot += w * s;
             }
-            let p = clamp_logistic_probability(table_squash(&self.squash_table, dot));
+            let p = clamp_probability(table_squash(&self.squash_table, dot));
 
             let row = &mut self.apm[node];
             let (lower, fraction) = apm_position(&self.stretch_table, p);
@@ -261,7 +261,7 @@ impl BitMix {
             // The APM carries three quarters of the coded probability,
             // lpaq1's blend. Plain operations, not `mul_add`, which is a
             // libm call on baseline x86-64 (issue #1979).
-            let coded = clamp_logistic_probability((p + 3.0 * calibrated) / 4.0);
+            let coded = clamp_probability((p + 3.0 * calibrated) / 4.0);
             let bit = code_bit(mid, coded);
 
             let target = f64::from(u8::from(bit));

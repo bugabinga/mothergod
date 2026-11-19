@@ -45,6 +45,12 @@ const LEARNING_RATE: f64 = 1.0 / 32.0;
 pub(crate) const MIN_PROBABILITY: f64 = 1.0 / 4096.0;
 const MAX_PROBABILITY: f64 = 1.0 - MIN_PROBABILITY;
 
+/// `p` clamped to `[MIN_PROBABILITY, MAX_PROBABILITY]`, the one range every
+/// probability this crate stretches or codes lives in.
+pub(crate) fn clamp_probability(p: f64) -> f64 {
+    p.clamp(MIN_PROBABILITY, MAX_PROBABILITY)
+}
+
 /// How a calibration table spaces its `BINS` bins across `[0.0, 1.0]`:
 /// the only thing [`Sse`] and [`LogitSse`] differ in. Construction, the
 /// interpolating read and the nudging write are [`Table`]'s, once.
@@ -135,7 +141,7 @@ impl Spacing for Logit {
     /// computed from.
     fn position(p: f64) -> (usize, f64) {
         let bound = *STRETCH_BOUND;
-        let s = stretch(p.clamp(MIN_PROBABILITY, MAX_PROBABILITY)).clamp(-bound, bound);
+        let s = stretch(clamp_probability(p)).clamp(-bound, bound);
         split_position((s + bound) / (2.0 * bound) * LAST_BIN)
     }
 
@@ -261,9 +267,7 @@ impl<S: Spacing> Table<S> {
 
     /// The read half of [`Self::refine`], at a [`Self::locate`]d bin pair.
     fn interpolate(&self, lower: usize, fraction: f64) -> f64 {
-        self.bins[lower]
-            .mul_add(1.0 - fraction, self.bins[lower + 1] * fraction)
-            .clamp(MIN_PROBABILITY, MAX_PROBABILITY)
+        clamp_probability(self.bins[lower].mul_add(1.0 - fraction, self.bins[lower + 1] * fraction))
     }
 
     /// The write half of [`Self::update`], at a [`Self::locate`]d bin pair.

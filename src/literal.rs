@@ -39,7 +39,7 @@ use crate::Rate;
 use crate::bittree;
 use crate::coder::{Decoder, Encoder};
 use crate::logistic::{squash, stretch};
-use crate::sse::{LogitSse, MIN_PROBABILITY, Sse};
+use crate::sse::{LogitSse, Sse, clamp_probability};
 
 /// Number of context predictors blended for every literal byte.
 const EXPERTS: usize = 6;
@@ -388,19 +388,6 @@ const LOGISTIC_INITIAL_RATE: f64 = 0.006;
 /// S2-R25's 0.002 sweep point (S2-A101 names why).
 const LOGISTIC_FLOOR_RATE: f64 = 0.002;
 
-/// Every probability [`SurpriseLogisticMix`] stretches or codes is clamped to
-/// `[LOGISTIC_PROBABILITY_FLOOR, 1 - LOGISTIC_PROBABILITY_FLOOR]`: an
-/// expert's upper-half probability before [`stretch`], bounding each
-/// stretch to `ln(4095)` in magnitude, and the squashed mix before the
-/// [`Sse`] and the gradient, so a saturated mix still leaves an error to
-/// learn from. [`Sse::refine`]'s own floor, [`MIN_PROBABILITY`].
-const LOGISTIC_PROBABILITY_FLOOR: f64 = MIN_PROBABILITY;
-
-/// `p` clamped to [`LOGISTIC_PROBABILITY_FLOOR`]'s range.
-fn clamp_logistic_probability(p: f64) -> f64 {
-    p.clamp(LOGISTIC_PROBABILITY_FLOOR, 1.0 - LOGISTIC_PROBABILITY_FLOOR)
-}
-
 /// Starting weight of every expert in every [`SurpriseLogisticMix`] weight
 /// vector: the six weights sum to one, so a fresh mixer squashes the
 /// experts' mean stretch.
@@ -457,7 +444,7 @@ fn logistic_mix_node(
     let mut dot = 0.0f64;
     for expert in 0..EXPERTS {
         let p = f64::from(upper[expert]) / f64::from(range[expert]);
-        stretched[expert] = stretch(clamp_logistic_probability(p));
+        stretched[expert] = stretch(clamp_probability(p));
         dot += weights[expert] * stretched[expert];
     }
     (stretched, dot)
@@ -970,7 +957,7 @@ impl Literal {
     /// expert banks then update on the landed byte, which is returned.
     ///
     /// Every expert's upper-half probability lies strictly inside `(0, 1)`
-    /// before [`clamp_logistic_probability`] even runs: every bank
+    /// before [`clamp_probability`] even runs: every bank
     /// frequency is at least 1 ([`crate::rescale_bank`] rounds up), and
     /// every node's range holds at least one symbol on each side.
     ///
@@ -1002,7 +989,8 @@ impl Literal {
         let byte = bittree::walk_nodes(|depth, node_prefix, _lo, mid, hi| {
             let upper = upper_half_masses(rows, mid, hi);
             let (stretched, dot) = logistic_mix_node(&upper, &range, &mixer.weights[weight_index]);
-            let p = clamp_logistic_probability(squash(dot));
+            // Clamped so a saturated mix still leaves an error to learn from.
+            let p = clamp_probability(squash(dot));
             let node_context = bittree::sse_context(depth, node_prefix);
             let bit = mixer
                 .sse

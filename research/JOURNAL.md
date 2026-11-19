@@ -7035,7 +7035,8 @@ record.
   `pub(crate)`); `literal::LogisticMix` (weights, a per-key
   `update_count`, its own `Sse` over `bittree::SSE_CONTEXTS`),
   `literal::logistic_rate`, `LOGISTIC_INITIAL_RATE`/`LOGISTIC_FLOOR_RATE`/
-  `LOGISTIC_RATE_DECAY`/`LOGISTIC_PROBABILITY_FLOOR`/
+  `LOGISTIC_RATE_DECAY`/`LOGISTIC_PROBABILITY_FLOOR` (left main in #2017,
+  folded into `sse::MIN_PROBABILITY`)/
   `LOGISTIC_INITIAL_WEIGHT`, `Literal::ideal_cost_bits_logistic_pair`;
   `codec::LogisticMixCostSink`,
   `ideal_cost_bits_logistic_mix_experiment`/`_at`; `bittree::walk_nodes`,

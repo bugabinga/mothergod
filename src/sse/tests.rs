@@ -459,3 +459,10 @@ fn split_position_truncation_is_floor_over_the_whole_bin_range() {
         assert_eq!(split_position(scaled).0, floor, "scaled={scaled}");
     }
 }
+
+#[test]
+fn clamp_probability_bounds_both_tails_and_passes_the_middle() {
+    assert!((clamp_probability(0.0) - MIN_PROBABILITY).abs() < 1e-18);
+    assert!((clamp_probability(1.0) - (1.0 - MIN_PROBABILITY)).abs() < 1e-18);
+    assert!((clamp_probability(0.3) - 0.3).abs() < 1e-18);
+}

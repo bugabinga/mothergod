@@ -142,7 +142,7 @@ fn a_fresh_apm_row_maps_a_probability_to_itself_within_interpolation_error() {
 fn table_stretch_is_exact_on_the_grid_and_inside_one_rounding_step_between() {
     let table = fresh_stretch_table();
     let half_step = 0.5 / f64::from(STRETCH_STEPS);
-    let clamped = |p: f64| stretch(clamp_logistic_probability(p));
+    let clamped = |p: f64| stretch(clamp_probability(p));
     for i in 0..=STRETCH_STEPS {
         let p = f64::from(i) / f64::from(STRETCH_STEPS);
         assert!(
