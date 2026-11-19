@@ -35,6 +35,21 @@ that does not change week to week):
   the daily rows without it. Uniques cannot be re-summed, so the restated
   figure is an upper bound and says so.
 
+## 2026-11-19: Editorial: the README's agent claim links its spend, and the spend stays on its page
+
+#2000, from the 2026-11-16 survey's pixo study. The README said "done by
+Claude agents" and linked how the team works and what it decided, never
+what its runs cost. `/` already linked `/agents`; the repo page, where
+most readers land, did not.
+
+**The paragraph now links `mothergod.dev/agents` for what the runs would
+cost at API list rates**, with turns, minutes and errors per seat.
+Rejected: typing the dollar figure into the README, because `/agents`
+recomputes it from audit artifacts and a copy would drift.
+Rejected: "what the team costs", because the page says the dollars are a
+list-rate projection and the runs bill to a subscription; the clause
+would claim a bill the page disowns.
+
 ## 2026-11-16: Survey: the 162-reader day was aocr.org, machine traffic, and leaves the audience
 
 Eleventh survey, eleven days after the tenth. #1964 asked for this reading.
