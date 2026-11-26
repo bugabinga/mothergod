@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use super::*;
 use crate::test_support::{
     as_codec_error, bcj_call_dense_data, columnar_drift_data, lz_payload, tabular_columns_data,
@@ -870,13 +872,17 @@ fn an_idle_thread_starting_the_wide_trial_early_never_changes_the_payload() {
 /// where [`widen`] runs no far trial, and the far one, where it runs both.
 const WINNING_REACHES: [Reach; 2] = [Reach::Wide, Reach::Far];
 
+/// What [`reach_winning_search`] returns: the input, the narrow winner as
+/// [`widen`] takes it, and the serial [`search`]'s result.
+type ReachWinningSearch = (Vec<u8>, Winner, (Candidate, Reach, Vec<u8>));
+
 /// Input where the trial at `reach` wins, the two candidates it is searched
 /// with, the narrow winner among them as [`widen`] takes it, and the result
 /// a serial [`search`] writes: an early guess either way, and the far trial
 /// on whichever thread, must reproduce that result. `reach` is
 /// [`Reach::Wide`] or [`Reach::Far`]: a record repeated just past the
 /// window of the reach below it.
-fn reach_winning_search(reach: Reach) -> (Vec<u8>, Winner, (Candidate, Reach, Vec<u8>)) {
+fn reach_winning_search(reach: Reach) -> ReachWinningSearch {
     let past = match reach {
         Reach::Wide => lz::WINDOW,
         Reach::Far => lz::WIDE_WINDOW,
@@ -906,62 +912,66 @@ fn reach_winning_search(reach: Reach) -> (Vec<u8>, Winner, (Candidate, Reach, Ve
     (data, (index, serial.0, body), serial)
 }
 
+/// [`reach_winning_search`] at each of [`WINNING_REACHES`], in that order,
+/// built once per test process and read by every `widen_*` test. Each
+/// entry costs a serial search of far-sized input; built per test, the
+/// three tests paid it three times, 58 s of the lib binary's 153 s (#1841).
+static REACH_WINNING_SEARCHES: LazyLock<[ReachWinningSearch; 2]> =
+    LazyLock::new(|| WINNING_REACHES.map(reach_winning_search));
+
 #[test]
 fn widen_joins_a_right_guess_and_matches_the_serial_search() {
     // On far-sized input the caller runs the far trial beside the guess.
-    for reach in WINNING_REACHES {
-        let (data, winner, serial) = reach_winning_search(reach);
-        let (index, candidate, _) = winner;
+    for (reach, (data, winner, serial)) in WINNING_REACHES.iter().zip(&*REACH_WINNING_SEARCHES) {
+        let (index, candidate, _) = *winner;
         let widened = thread::scope(|scope| {
-            let handle = scope.spawn(|| trial_body(&data, candidate, Reach::Wide));
+            let handle = scope.spawn(|| trial_body(data, candidate, Reach::Wide));
             widen(
                 scope,
-                &data,
-                winner,
+                data,
+                winner.clone(),
                 Some((index, handle)),
                 crate::test_support::nz(2),
             )
         });
-        assert_eq!(widened, serial, "{reach:?}");
+        assert_eq!(&widened, serial, "{reach:?}");
     }
 }
 
 #[test]
 fn widen_ignores_a_wrong_guess_and_matches_the_serial_search() {
-    for reach in WINNING_REACHES {
-        let (data, winner, serial) = reach_winning_search(reach);
+    for (reach, (data, winner, serial)) in WINNING_REACHES.iter().zip(&*REACH_WINNING_SEARCHES) {
         let wrong = 1 - winner.0;
         let widened = thread::scope(|scope| {
             // An empty body would win were it consumed.
             let handle = scope.spawn(Vec::new);
             widen(
                 scope,
-                &data,
-                winner,
+                data,
+                winner.clone(),
                 Some((wrong, handle)),
                 crate::test_support::nz(2),
             )
         });
-        assert_eq!(widened, serial, "{reach:?}");
+        assert_eq!(&widened, serial, "{reach:?}");
     }
 }
 
 #[test]
 fn widen_without_a_guess_matches_the_serial_search_at_any_workers() {
     // One worker runs the far trial after the wide one, two run it beside.
-    for reach in WINNING_REACHES {
-        let (data, winner, serial) = reach_winning_search(reach);
+    for (reach, (data, winner, serial)) in WINNING_REACHES.iter().zip(&*REACH_WINNING_SEARCHES) {
         for workers in [1, 2] {
             let widened = thread::scope(|scope| {
                 widen(
                     scope,
-                    &data,
+                    data,
                     winner.clone(),
                     None,
                     crate::test_support::nz(workers),
                 )
             });
-            assert_eq!(widened, serial, "{reach:?}, {workers} workers");
+            assert_eq!(&widened, serial, "{reach:?}, {workers} workers");
         }
     }
 }
