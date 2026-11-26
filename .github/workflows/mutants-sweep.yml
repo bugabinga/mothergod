@@ -20,10 +20,19 @@
 # 130 min per shard of 188 mutants, under the 140 the step allowed. The
 # 2026-11-01 sweep (41316596797, 02865a5) had 2034 mutants, 203 a shard:
 # five of ten shards hit the 140 and 271 never ran, the second month
-# without a score, so from 2026-11-02 it is twelve shards of about 170
-# under 200 min: the finished shards took 101 to 118 min, the cut ones
-# needed about 170 to 190 by their unreached count, scaled by 170/203
-# that is 143 to 160, and 200 leaves a quarter for a crate that grows. The
+# without a score, and twelve shards under 200 min lost the third: the
+# 2026-11-19 dispatch (44487915825, fd89354) had 2381 mutants, 198 a
+# shard, ten of twelve shards were cut and 324 never ran (#2019). Both
+# resizes scaled by mutant count and missed what moves: minutes per
+# mutant follow the runner. That run's shards decided a mutant every 0.89
+# to 1.75 min, in step with their own baseline test phase, 65 s on the
+# fastest runner and 135 s on the slowest; two of the twelve drew the
+# slow kind and would have needed about 350 min for their 198, which no
+# budget under the six-hour job cap leaves room for. The size rule
+# since 2026-11-26, to re-derive from the newest run's
+# `outcomes.json` whenever a shard is cut: mutants per shard times the
+# slowest shard's minutes per mutant stays under 0.7 of the step budget.
+# Twenty shards of about 119 need 208 min at 1.75, under 0.7 of 300. The
 # release profile was measured too and rejected: the suite drops
 # to 40 s but every mutant rebuilds at opt-level 3, and the two slowest
 # binaries (the lib's unit tests and tests/encode_memory.rs, 25 s each in
@@ -47,11 +56,13 @@
 # after the next push to main; a retry costs the whole matrix, so the
 # cut-is-not-red rule above is what keeps a slow month from costing two.
 #
-# Monthly first (#455's gate): 20.8 runner-hours on 2026-11-01 (run
-# 41316596797, ten shard steps summing to 1246 min with 271 mutants
-# unrun), up to 40 under the budget above, on a public repository's free
-# minutes, twelve of the account's twenty concurrent jobs for up to 200
-# minutes. Weekly only if that stays cheap and the score still
+# Monthly first (#455's gate): 39.4 runner-hours on 2026-11-19 (run
+# 44487915825, twelve shard steps summing to 2366 min with 324 mutants
+# unrun), about 46 for the whole crate at that run's mean of 1.15 min a
+# mutant, on a public repository's free minutes. `max-parallel` holds it
+# to ten of the account's twenty concurrent jobs, so the factory keeps
+# the other ten for the five hours the sweep takes; nobody waits on this
+# run's wall clock. Weekly only if that stays cheap and the score still
 # moves; the cadence decision lives in this comment, not in an issue.
 #
 # The 1st at 07:41 UTC is clear of every other cron (`grep -n cron:
@@ -80,30 +91,52 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   # The matrix below lists 0..SHARDS-1; change both together.
-  SHARDS: "12"
+  SHARDS: "20"
 
 jobs:
   mutate:
     runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout
-    timeout-minutes: 220
+    timeout-minutes: 320
     strategy:
       fail-fast: false
+      max-parallel: 10
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        shard: [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+        ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/cargo-mutants
 
-      # 200 minutes inside the step, under the step's own 210: the inner
+      # 300 minutes inside the step, under the step's own 310: the inner
       # `timeout` interrupts cargo-mutants, which has written every decided
       # outcome by then, and exits 124 (137 when the kill was needed), the
       # cut the report reads as undecided. 0, 2 and 3 are cargo-mutants'
       # own verdicts (clean, missed, timeouts), judged by the report, not
       # here. Anything else is a run that could not complete, and red.
       - name: Mutate shard
-        timeout-minutes: 210
+        timeout-minutes: 310
         env:
           SHARD: ${{ matrix.shard }}
         run: |
@@ -112,14 +145,14 @@ jobs:
           # allocates what it should not fails there instead of swapping
           # the runner to death; four jobs at the cap fit 16 GiB.
           set +e
-          timeout --signal=INT --kill-after=120 12000 \
+          timeout --signal=INT --kill-after=120 18000 \
             cargo mutants --config tests/mutants.toml --package mothergod \
               --shard "$SHARD/$SHARDS" --timeout-multiplier 10 -j 4
           status=$?
           set -e
           case $status in
             0 | 2 | 3) ;;
-            124 | 137) echo "::warning::shard $SHARD/$SHARDS cut at 200 min; its unreached mutants are undecided" ;;
+            124 | 137) echo "::warning::shard $SHARD/$SHARDS cut at 300 min; its unreached mutants are undecided" ;;
             *) echo "cargo-mutants could not complete (exit $status)"; exit 1 ;;
           esac
 
