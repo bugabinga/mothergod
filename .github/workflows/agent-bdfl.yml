@@ -192,7 +192,7 @@ jobs:
         uses: ./.github/actions/seat-bun
       - id: claude
         if: steps.guard.outputs.paused != 'true'
-        uses: anthropics/claude-code-action@9eb012b6d0900c2b9eede65ee1758cec4d2973e9 # v1
+        uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1
         env:
           # The token sidecar's newest mint; the four writers read it at
           # each gh call (#1687).
@@ -245,6 +245,15 @@ jobs:
         with:
           path_to_bun_executable: ${{ steps.bun.outputs.path }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # An operator comment or review on a claude[bot] PR wakes this
+          # seat in a pull request context, where the action from 1.0.273
+          # denies cargo, node, python3 and the shells, and a deny rule
+          # outranks bypassPermissions: the seat that repairs the others
+          # could not run its checks before a push. No fork's code meets
+          # this job's secrets either way: GitHub passes a fork's pull
+          # request and review events none, and a comment event checks
+          # out main (agents/GOVERNANCE.md "Tool envelopes").
+          restrict_untrusted_prs: false
           # No ${{ }} in this block, here or in any agent workflow. One
           # expression makes the whole block an expression, capped at
           # 21,000 characters; this one is ~26,000 and GitHub rejected the

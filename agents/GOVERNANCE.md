@@ -572,11 +572,14 @@ access, and counts every `[bot]` author as lacking it, `allowed_bots`
 notwithstanding. Nearly every PR here is `claude[bot]`'s, so that default
 leaves a reviewer that reads diffs it can no longer run, on a green job
 with one warning in its log. A seat that pull request events reach says
-`restrict_untrusted_prs: false`. That loosens nothing: the boundary is the
-trigger surface above, and the job conditions already refuse forks. An
-action bump is read against these two before it merges, and the BDFL's
-own workflow takes a new pin last, after the other seats ran on it,
-because that seat is the one that repairs the rest.
+`restrict_untrusted_prs: false`: the reviewer and the BDFL. That loosens
+nothing: the boundary is the trigger surface above. The reviewer's job
+condition refuses forks. The BDFL's admits the operator's events alone,
+and one on a fork's thread brings no fork code to its secrets: GitHub
+passes a fork's pull request and review events none, and a comment event
+checks out main. An action bump is read against these two before it
+merges, and the BDFL's own workflow takes a new pin last, after the other
+seats ran on it, because that seat is the one that repairs the rest.
 
 One wall no allowlist opens: the harness denies every write under its
 protected paths (`.git`, `.cargo`, `.claude`, `.vscode` and the rest of the
