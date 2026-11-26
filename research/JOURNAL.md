@@ -10884,3 +10884,30 @@ record.
   time on both files. | **Not measured:** the other ten Silesia files;
   Canterbury; any CPU but this one; the whole-buffer path on Silesia.
   `research/progress.jsonl` it347.
+- S2-A163 | ACCEPTED | Charter #1922 question 2, class (b)'s rate
+  driver given an entry point (issue #2035). Hypothesis: S2-A161's keep
+  rule compares a reading from the champion's build with one from the
+  try's, two processes, while `RateReport::falls_past_margin` takes both
+  in one; a binary that writes the first reading to a file and reads it
+  back in the second ends the scratch caller each session wrote, and with
+  it the hand transcription of a printed report. | Mechanism:
+  `RateReport::record` prints every field, one line each, seconds in
+  `f64`'s shortest round-trip form, and `RateReport::from_record` reads it
+  back to an equal report, refusing a line out of order or format, a time
+  not finite and above zero, and a record of no round. The `bit_mix_rate`
+  binary's `measure` prints the record on stdout and the report on
+  stderr; `verdict <file>` reads the file before measuring, then prints
+  the try's report, both ratios with their margins and the keep rule's
+  answer, exit 0 whatever it is. It exits 1 when the two readings walked
+  different literal byte counts, because their ratios then time different
+  streams, a check `falls_past_margin` alone does not make. | Measured,
+  main at `bd11af6`, release build, Intel Xeon Platinum 8573C runner,
+  219,956 literal bytes: `measure` 15.5 s, ratio 0.1870, spread 0.5%;
+  `verdict` of that file on the same build read 0.1877, `Some(false)`,
+  exit 0; the file's candidate times scaled by 1.25 by hand read
+  0.2337 against 0.1871, `Some(true)`; its CPU line set to the EPYC 7763
+  read `None`; a missing file exits 1 before measuring. | Verdict:
+  **accepted** (`kind: "patch"`, null deltas), a capability patch with no
+  comparable benchmark. | **Not measured:** a reading on the 8573C of a
+  layout-only build, so S2-A161's 8% floor is unchecked on this model.
+  `research/progress.jsonl` it348.
