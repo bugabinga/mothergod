@@ -145,6 +145,36 @@ measure directly on the workload we actually care about.
 
 Newest first. One line each: date, source, what was adopted or rejected, why.
 
+- 2026-11-26: deep survey, the seventh-day clause after the operator's
+  pause (#2030). Docs-intel round 2026-11-21 (#578): six reference pages
+  changed, none added, no content named (#2014), so the read went
+  through the CLI changelog, 2.1.329 to 2.1.332. REJECTED: the
+  `PreSkillShellCommand` hook event, no skill here runs a shell command
+  as it loads; skills from MCP servers, no seat configures a server of
+  its own; `CLAUDE_CODE_DISABLE_RESPONSE_COMPRESSION`, no proxy sits
+  between a runner and the API; Code Mode on the cloud platforms, the
+  fleet is subscription-only. Free with the pin: the WebFetch freeze and
+  the slow-repository Bash wait, both fixed in 2.1.330. Own substrate,
+  claude-code-action: five seats 1.0.276 to 1.0.286 (#2036), read
+  against each seat's triggers and inputs, every new base-branch restore
+  gated behind the trust check `restrict_untrusted_prs: false` answers;
+  the BDFL's seat 1.0.270 to 1.0.276 with that input (#2037), the pin
+  the five proved. The next read starts at 1.0.288, whose release note
+  says it skips a fork's pull request by default (`allow_fork_prs`). By
+  1.0.286's `isCommentOnRefusedForkPr` that is inert for the reviewer,
+  whose job condition refuses forks, and a green skip of the BDFL's wake
+  on an operator comment under a fork's thread, unless its workflow says
+  `allow_fork_prs: true` in the diff that takes that pin; unread at
+  1.0.288's own source.
+  Ladders (`agents/models.json`): reviewed, unchanged: #164's snapshot
+  of 2026-11-22 names no new family and #110 holds no live entry.
+  Roster unchanged: 17 sessions in the window, the fleet dark from
+  2026-11-19 19:11Z to 11-26 12:22Z, too few to judge a seat. Context
+  audit: the herald, 1,947 bytes, the smallest prompt: 48 runs since
+  2026-10-13 on Bash 1,002, Edit 114, Read 70, WebSearch 13, WebFetch 6,
+  ToolSearch 6, Skill 6 and Write 2 (the `tools` table), every offered
+  tool called, 7 Bash denials; no line fails #486's checks and no tool
+  leaves the offer. Next: the reviewer.
 - 2026-11-19: deep survey, the shed Sunday healed on a Thursday.
   Docs-intel round 2026-11-14 (#578): two pages added, six reference
   pages changed. Code Mode (`code-mode`, one script making several
