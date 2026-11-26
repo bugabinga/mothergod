@@ -35,6 +35,113 @@ that does not change week to week):
   the daily rows without it. Uniques cannot be re-summed, so the restated
   figure is an upper bound and says so.
 
+## 2026-11-26: Survey: ten repo readers spent their views on the factory's August, and the price of memory is missing
+
+Twelfth survey, ten days after the eleventh.
+
+### (a) Audience
+
+| Metric | 2026-11-26 | 2026-11-16 | Source |
+|---|---|---|---|
+| Stars | 1 | 1 | `gh api repos/bugabinga/mothergod` → `stargazers_count` |
+| Forks | 0 | 0 | same call, `forks_count` |
+| Watchers | 0 | 0 | same call, `subscribers_count` |
+| External issue authors, excluding machine-filed | 0 of 131 | 0 of 130 | `gh issue list --state all --limit 3000`: 96 `app/claude`, 35 `bugabinga`; 502 `app/github-actions` excluded |
+| External PR authors | 0 of 1407 | 0 of 1376 | `gh pr list --state all --limit 4000`: 1348 `app/claude`, 33 `bugabinga`, 26 `app/dependabot` |
+| mothergod.dev pageloads | 4 in 7d | 1 in 7d | Cloudflare Web Analytics GraphQL, `rumPageloadEventsAdaptiveGroups`, account-level, site tag `7c1ab790…`, window 2026-11-19 18:50 UTC to 11-26 18:50 UTC, `avg { sampleInterval }` 1 on every row; a second fetch grouped by `date` alone returned the same 4 |
+| Hacker News mentions | 0 | 0 | Algolia API: query `mothergod.dev` returns no hits; query `mothergod`, `hitsPerPage=100`, returns 100 hits, none naming the repo, the domain or compression; query `bugabinga` returns 9 hits, all titles read, none about the project |
+| lobste.rs submissions | 0 | 0 | `https://lobste.rs/domains/mothergod.dev` still 404 |
+| reddit mentions | not measured | not measured | `reddit.com/search.json` still 403 to the runner IP |
+| Web search presence | absent | absent | WebSearch for `"bugabinga/mothergod"`: mythology pages only; for `mothergod.dev lossless compressor`: generic image-compression pages only |
+| GitHub repo views, 14d | 47, 10 unique | 19, 8 unique | issue #435 ledger, top table, edit of 2026-11-22 12:42 UTC (run 45023685626), window 2026-11-08..11-21; the daily rows sum to the same 47 |
+
+**The repo's readers read the factory, not the compressor.** Five paths
+carry 38 of the window's 47 views: `/pull/180` (12), its squash commit
+`d579612` ("Compile the operator sweep: one command, and it reads review
+bodies") (8), `/pull/142` (8), `/issues/50` (6), `/issues/147` (4). All
+five are agent-system threads opened on 2026-08-22 and 08-23: the operator
+sweep, the BDFL wake guard, and the self-trigger cost. The repo root is not
+among the ten most-viewed paths. Each of the five has at most 3 uniques, so
+the cluster is at most three readers and could be one returning. The ledger
+cannot say whether the operator is among them.
+
+**The machine-traffic rule clears this window.** The referrer table has one
+row, `github.com`, at 1 view. Views are about five times uniques, not equal
+to them. The top path holds double-digit views. The site logged a pageload
+on 11-19, inside the window. No test in the rule fires, so these views stay
+in the audience, as single digits.
+
+**The site's four.** One load on 11-19 (China, mobile, `/`, no referrer),
+the same profile as last week's single load. Three on 11-26 (United States,
+desktop, `/`): two with no referrer, one from `bing.com`, the first search
+referral since the 2026-10-29 survey's. Four loads is noise at this volume. Nothing here is growth.
+
+**Caveat, coverage.** The ten-day gap between surveys leaves 2026-11-16
+06:52 to 11-19 18:50 outside the 7-day window. Rows that old are sampled,
+as the 2026-11-16 caveat records, so they are not read as a number.
+
+### (b) Study: cmix's README and homepage
+
+Chosen because cmix is the nearest comparable on the axis we sell. It is a
+lossless compressor that trades speed for ratio, with context mixing at
+its core. Read 2026-11-26 from the repository README
+(`gh api repos/byronknoll/cmix/readme`, version 21, released 2024-09-10),
+`byronknoll.com/cmix.html`, and `gh api repos/byronknoll/cmix`: 734 stars,
+58 forks, created 2015-11-02. Nothing read shows where those stars came
+from.
+
+1. **The price comes in the same sentence as the purpose.** "aimed at
+   optimizing compression ratio at the cost of high CPU/memory usage".
+   The next paragraph carries the hardware bar: "At least 32GB of RAM is
+   recommended to run cmix."
+2. **Its benchmark table is its own rows alone.** Calgary, Silesia and three
+   enwik sizes show size, time and memory, with no competitor rows. For
+   comparison it links three third-party rankings: the Large Text Compression
+   Benchmark, the Silesia benchmark, and the Lossless Photo Compression
+   Benchmark.
+3. **One property is stated flatly where a reader would otherwise ask:**
+   "Compression and decompression time are symmetric."
+4. **The changelog is the README's body**: twenty version deltas, three to
+   six bullets each, in the vocabulary of the model ("LSTM tuning",
+   "Memory tuning").
+
+**Adopted: (1), as the missing half of our price.** The README's
+"It is slow" paragraph prices speed against `xz -9e` from the same run.
+It says nothing of memory. Our reports carry the figure: the default level
+peaks at 984.1 MiB on Silesia, against 506.6 MiB for `xz -9e`
+(`docs/benchmarks/silesia.md`, 2026-11-21). A reader deciding whether it
+fits their machine asks that before asking about speed. Filed as #2041.
+
+**Rejected: (2)'s third-party rankings.** Getting listed on them means
+submitting to someone else's table. That is outward publishing, which
+`agents/IDENTITIES.md` does not cover, and it is the operator's call
+anyway. We also cannot link a ranking we are not on. The same-run
+competitor columns stay, because a reader cannot reproduce cmix's
+comparison without the third party, and can reproduce ours.
+
+**Rejected: (3) as a sentence of ours.** Our decode is not symmetric with
+encode; the reports show decode about 26 times faster on Silesia. The
+reports' rates already answer the question, so a flat statement adds
+nothing.
+
+**Rejected: (4).** A changelog in model vocabulary serves cmix's audience,
+which is other compressor authors. Ours is the evaluating engineer, and L1
+keeps our changelog in reader terms.
+
+### (c) What changes because of (a) and (b)
+
+- **One surface change, filed**: #2041, a memory price beside the speed
+  price in the README's "It is slow" paragraph, and on `/` if it carries
+  the same sentence. Labeled `product` and `marketing`.
+- **Not filed, recorded**: the repo's readers spent their views on
+  agent-system threads from August. At most three readers, one window, and
+  no referrer cannot carry a surface change. If next week's paths again
+  favour `agent-system` threads over the root, then "Who builds it" is
+  what readers want first. That would be a positioning question, raised
+  then with two windows of evidence.
+- **The audience, restated**: single digits on both instruments, no
+  external actor, nothing in the wild.
+
 ## 2026-11-19: Editorial: the README's agent claim links its spend, and the spend stays on its page
 
 #2000, from the 2026-11-16 survey's pixo study. The README said "done by
