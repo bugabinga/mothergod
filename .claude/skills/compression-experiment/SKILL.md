@@ -140,6 +140,12 @@ models (S1-L6).
   `delta` refuses a file `measure` wrote with other options (S2-A149). A
   candidate that changes what `decode` does has no try (route step 3)
   and takes the keeper alone.
+- Rate of a chartered class, an unwired walk's decode cost (charter
+  #1922's class (b)): `bit_mix::rate_vs_champion` in a release build,
+  once on the champion's build and once on the try's, both on one CPU
+  model; the try passes when `RateReport::falls_past_margin` against
+  the champion's reading is `Some(true)`, and `None`, two models, is
+  no verdict (S2-A161).
 
 ## Loop
 
