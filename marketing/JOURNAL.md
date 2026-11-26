@@ -92,7 +92,7 @@ from.
 
 1. **The price comes in the same sentence as the purpose.** "aimed at
    optimizing compression ratio at the cost of high CPU/memory usage".
-   The next sentence is the hardware bar: "At least 32GB of RAM is
+   The next paragraph carries the hardware bar: "At least 32GB of RAM is
    recommended to run cmix."
 2. **Its benchmark table is its own rows alone.** Calgary, Silesia and three
    enwik sizes show size, time and memory, with no competitor rows. For
