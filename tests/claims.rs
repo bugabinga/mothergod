@@ -1424,7 +1424,7 @@ fn site_silesia_speed_prose_matches_its_generated_report() {
             15.0,
             30.0,
         ),
-        ("under two minutes to read back", minutes(decode), 1.0, 2.0),
+        ("under a minute to read back", minutes(decode), 0.5, 1.0),
         (
             "more than ten times slower than decoding",
             decode / encode,
