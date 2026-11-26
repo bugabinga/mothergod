@@ -17,7 +17,7 @@ use crate::reference::cpu_model;
 use crate::speed::{self, Kernel, median_of_sorted};
 use mothergod::literal::bit_mix::BitMix;
 use mothergod::literal::{Context, Literal, SurpriseLogisticMix};
-use std::fmt;
+use std::fmt::{self, Write as _};
 use std::hint::black_box;
 use std::num::NonZeroUsize;
 use std::time::Instant;
@@ -283,6 +283,106 @@ impl RateReport {
     pub fn candidate_cost(&self) -> f64 {
         self.cost(|round| round.candidate)
     }
+
+    /// This reading as text [`Self::from_record`] reads back to an equal
+    /// report, so a champion's reading taken in one build is a file the
+    /// try's build compares against: `bit_mix rate record`, then one line per
+    /// field in a fixed order, the CPU line absent when the model was
+    /// unread. Seconds print in `f64`'s shortest round-trip form, so no
+    /// digit is lost. A CPU model holds no line break, because
+    /// [`cpu_model`] reads one trimmed line.
+    #[must_use]
+    pub fn record(&self) -> String {
+        let mut text = format!("{RECORD_HEADER}\n");
+        let mut line = |args: fmt::Arguments<'_>| {
+            writeln!(text, "{args}").expect("writing to a String never fails");
+        };
+        if let Some(cpu) = &self.cpu {
+            line(format_args!("cpu {cpu}"));
+        }
+        line(format_args!("literal_bytes {}", self.literal_bytes));
+        line(format_args!(
+            "calibration_seconds {}",
+            self.calibration_seconds
+        ));
+        for round in &self.rounds {
+            line(format_args!("round {} {}", round.champion, round.candidate));
+        }
+        text
+    }
+
+    /// The report [`Self::record`] wrote as `text`.
+    ///
+    /// # Errors
+    ///
+    /// Names the first line out of the record's order or format, a time
+    /// that is not finite and above zero, because a ratio of it is no
+    /// reading, and a record of no round, which has no median.
+    pub fn from_record(text: &str) -> Result<Self, String> {
+        let lines: Vec<&str> = text.lines().collect();
+        if lines.first() != Some(&RECORD_HEADER) {
+            return Err(format!("line 1: expected `{RECORD_HEADER}`"));
+        }
+        let mut at = 1;
+        let cpu = lines
+            .get(at)
+            .and_then(|line| line.strip_prefix("cpu "))
+            .map(|cpu| {
+                at += 1;
+                cpu.to_string()
+            });
+        let bytes = record_field(&lines, &mut at, "literal_bytes")?;
+        let literal_bytes = bytes
+            .parse()
+            .map_err(|err| format!("line {at}: literal_bytes `{bytes}`: {err}"))?;
+        let seconds = record_field(&lines, &mut at, "calibration_seconds")?;
+        let calibration_seconds = seconds_of(at, seconds)?;
+        let mut rounds = Vec::new();
+        while at < lines.len() {
+            let pair = record_field(&lines, &mut at, "round")?;
+            let (champion, candidate) = pair
+                .split_once(' ')
+                .ok_or_else(|| format!("line {at}: expected `round <champion> <candidate>`"))?;
+            rounds.push(RateRound {
+                champion: seconds_of(at, champion)?,
+                candidate: seconds_of(at, candidate)?,
+            });
+        }
+        if rounds.is_empty() {
+            return Err("holds no `round` line".to_string());
+        }
+        Ok(Self {
+            cpu,
+            literal_bytes,
+            calibration_seconds,
+            rounds,
+        })
+    }
+}
+
+/// [`RateReport::record`]'s first line, which names the file a reading.
+const RECORD_HEADER: &str = "bit_mix rate record";
+
+/// The value of `lines[*at]`, which must read `<key> <value>`, advancing
+/// `at` past it, so an error's `line {at}` is the line it names.
+fn record_field<'a>(lines: &[&'a str], at: &mut usize, key: &str) -> Result<&'a str, String> {
+    let line = lines
+        .get(*at)
+        .ok_or_else(|| format!("ends before its `{key}` line"))?;
+    *at += 1;
+    line.strip_prefix(key)
+        .and_then(|rest| rest.strip_prefix(' '))
+        .ok_or_else(|| format!("line {at}: expected `{key} <value>`, found `{line}`"))
+}
+
+/// `value`, from record line `line`, as seconds a ratio can divide by.
+fn seconds_of(line: usize, value: &str) -> Result<f64, String> {
+    match value.parse::<f64>() {
+        Ok(seconds) if seconds.is_finite() && seconds > 0.0 => Ok(seconds),
+        _ => Err(format!(
+            "line {line}: `{value}` is no finite time above zero"
+        )),
+    }
 }
 
 impl fmt::Display for RateReport {
@@ -341,7 +441,9 @@ pub fn rate_over(streams: &[Vec<(Context, u8)>], rounds: NonZeroUsize) -> RateRe
 /// The class's rate driver: [`rate_over`] the eleven train cases' literal
 /// streams in five rounds. Read it in a release build, once on the
 /// champion's build and once on the try's, on one CPU model, and keep the
-/// try when [`RateReport::falls_past_margin`] answers `Some(true)`.
+/// try when [`RateReport::falls_past_margin`] answers `Some(true)`. The
+/// `bit_mix_rate` binary is that procedure: `measure > <file>` on the
+/// champion's build, `verdict <file>` on the try's.
 #[must_use]
 pub fn rate_vs_champion() -> RateReport {
     let streams: Vec<_> = baseline::cases()
@@ -552,6 +654,83 @@ mod tests {
         let reading = report(&[0.5, 0.25, 0.75]);
         assert!((reading.champion_cost() - 1_000.0).abs() < 1e-9);
         assert!((reading.candidate_cost() - 500.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_record_reads_back_to_the_report_it_was_written_from() {
+        // Seconds with no short decimal form, so a lossy print would show.
+        let mut reading = report(&[0.1 + 0.2, 1.0 / 3.0, 2e-9]);
+        reading.calibration_seconds = std::f64::consts::PI;
+        assert_eq!(
+            RateReport::from_record(&reading.record()),
+            Ok(reading.clone())
+        );
+
+        reading.cpu = None;
+        let record = reading.record();
+        assert!(!record.contains("cpu"), "{record}");
+        assert_eq!(RateReport::from_record(&record), Ok(reading));
+    }
+
+    #[test]
+    fn a_record_prints_one_line_per_field_in_order() {
+        assert_eq!(
+            report(&[0.5, 0.25]).record(),
+            "bit_mix rate record\ncpu Xeon 6975P-C\nliteral_bytes 1000\n\
+             calibration_seconds 4\nround 1 0.5\nround 1 0.25\n"
+        );
+    }
+
+    /// Every way a record can fail names the line, so a hand-edited or
+    /// truncated champion file is refused rather than read as a reading.
+    #[test]
+    fn a_record_out_of_order_or_format_or_without_a_round_is_refused() {
+        let good = report(&[0.5, 0.25]).record();
+        for (text, error) in [
+            (String::new(), "line 1: expected `bit_mix rate record`"),
+            (
+                good.replace("bit_mix rate record", "{\"cases\": {}}"),
+                "line 1: expected `bit_mix rate record`",
+            ),
+            (
+                "bit_mix rate record\ncpu Xeon 6975P-C\n".to_string(),
+                "ends before its `literal_bytes` line",
+            ),
+            (
+                good.replace("literal_bytes 1000", "literal_bytes -1"),
+                "line 3: literal_bytes `-1`: invalid digit found in string",
+            ),
+            (
+                good.replace("round 1 0.5\nround 1 0.25\n", ""),
+                "holds no `round` line",
+            ),
+            (
+                good.replace("round 1 0.25", "round 1"),
+                "line 6: expected `round <champion> <candidate>`",
+            ),
+            (
+                format!("{good}ratio 0.5\n"),
+                "line 7: expected `round <value>`, found `ratio 0.5`",
+            ),
+            (
+                good.replace("calibration_seconds 4", "calibration_seconds 0"),
+                "line 4: `0` is no finite time above zero",
+            ),
+            (
+                good.replace("round 1 0.5", "round NaN 0.5"),
+                "line 5: `NaN` is no finite time above zero",
+            ),
+            (
+                good.replace("round 1 0.25", "round 1 inf"),
+                "line 6: `inf` is no finite time above zero",
+            ),
+        ] {
+            assert_eq!(
+                RateReport::from_record(&text),
+                Err(error.to_string()),
+                "{text}"
+            );
+        }
     }
 
     #[test]
