@@ -373,8 +373,10 @@
           more than ten times slower than decoding. In the same run,
           <code>xz -9e</code> encoded Silesia at 1.889 MB/s and decoded it at
           84.282 MB/s, more than nine times faster to encode and more than
-          twenty times faster to decode. The reports set every level of gzip,
-          zstd and xz beside mothergod, peak memory included.
+          twenty times faster to decode. Memory is the second price: peak memory
+          on Silesia was 984.1 MiB, against 506.6 MiB for
+          <code>xz -9e</code>. The reports set every level of gzip, zstd and xz
+          beside mothergod.
         </p>
         <p id="speed-bar">
           Speed heads the

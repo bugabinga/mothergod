@@ -1227,6 +1227,31 @@ fn published_speed_anchor_matches_its_generated_report() {
     }
 }
 
+/// README and site price memory beside speed: Silesia's peak MiB for the
+/// default level and for `xz -9e`, from the same frontier table, in that
+/// order (issue #2041). A restated peak rots at the next regeneration like
+/// a rate does, so it is held to the report row. The report prints one
+/// decimal, and so do the surfaces.
+#[test]
+fn published_peak_memory_matches_its_generated_report() {
+    let source = "docs/benchmarks/silesia.md";
+    let peak = |needle: &str| frontier_numbers("silesia.md", needle)[3];
+    let truth = [peak("| **mothergod** |"), peak("| xz -9e |")].map(|mib| format!("{mib:.1}"));
+    let name =
+        |index: usize| ["Silesia mothergod peak MiB", "Silesia xz -9e peak MiB"][index].to_owned();
+    let locate = |text: &str| {
+        let start = text.find("on Silesia was").expect("the peak sentence");
+        let end = start
+            + text[start..]
+                .find("</p>")
+                .or_else(|| text[start..].find("\n\n"))
+                .expect("its paragraph ends");
+        unit_number_spans(text, start..end, &["MiB"])
+    };
+    check_figures("README.md", source, locate, &truth, name);
+    check_figures("site/index.html", source, locate, &truth, name);
+}
+
 /// Byte range of the CPU model name after `marker`: everything up to the
 /// ", N logical core" that follows it, so the report's `"Intel(R) Xeon(R)
 /// 6973P-C, 4 logical core(s)"` and the site prose's `"(Intel(R) Xeon(R)

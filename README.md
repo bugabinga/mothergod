@@ -46,6 +46,8 @@ is open-ended research with no date attached. Every file's numbers:
 decoded it at 4.146 MB/s. In the same run, `xz -9e` encoded Silesia at 1.889
 MB/s and decoded it at 84.282 MB/s, more than nine times faster to encode and
 more than twenty times faster to decode.
+Memory is the second price: peak memory on Silesia was 984.1 MiB, against
+506.6 MiB for `xz -9e`.
 Speed heads [`ROADMAP.md`](ROADMAP.md#m9-speed-adr-0084): the first release
 waits until the default level encodes and decodes at half of `xz -9e`'s speed
 or better on both corpora, in the same run, while still beating `zstd -19` on
