@@ -413,7 +413,11 @@ test("ROLE other than bdfl refuses a PR touching .github/workflows/ before any m
 test("ROLE other than bdfl on a PR touching no workflow file goes on to the merge", () => {
   const { status, stdout, merges } = run(["42"], {
     env: { ROLE: "reviewer" },
-    responses: [files(".github/scripts/merge-pr"), { match: "^api repos/o/r/pulls/42$", responses: [pr([])] }, merge],
+    responses: [
+      files(".github/scripts/merge-pr"),
+      { match: "^api repos/o/r/pulls/42$", responses: [pr(["agent-approved"])] },
+      merge,
+    ],
   });
   assert.equal(status, 0, stdout);
   assert.equal(merges.length, 1);
@@ -688,6 +692,52 @@ const armed = {
     },
   ],
 };
+
+// On 2026-11-26 post-verdict refused two PASS bodies for a bare hash, moved
+// nothing, and the reviewer's next line was merge-pr: #2039 was armed with
+// no verdict on the thread and #2042 landed under `changes-requested`. The
+// merge and the arm are both scripted here, so a refusal that reaches
+// neither is the check's doing and not the stub's.
+for (const [name, labels] of [
+  ["no verdict label", []],
+  ["changes-requested", ["changes-requested"]],
+  ["both labels", ["agent-approved", "changes-requested"]],
+]) {
+  test(`ROLE reviewer on a PR carrying ${name} is refused before any merge or arm`, () => {
+    const { status, stderr, merges, calls } = run(["42", "--sha", HEAD], {
+      env: { ROLE: "reviewer" },
+      responses: [
+        files(".github/scripts/merge-pr"),
+        { match: "^api repos/o/r/pulls/42$", responses: [pr(labels)] },
+        unmet,
+        armed,
+      ],
+    });
+    assert.equal(status, 1, stderr);
+    assert.match(
+      stderr,
+      new RegExp(`#42 carries verdict labels ${labels.join(", ") || "none"}, so no PASS is typed on it`),
+    );
+    assert.match(stderr, /post-verdict 42 pass/);
+    assert.deepEqual(merges, []);
+    assert.equal(calls.filter((argv) => argv[1] === "graphql").length, 0);
+  });
+}
+
+test("the BDFL's seat and a human's shell merge on their own reading of the thread, whatever the labels", () => {
+  for (const env of [{ ROLE: "bdfl" }, {}]) {
+    const { status, stdout, merges } = run(["42"], {
+      env,
+      responses: [
+        files(".github/scripts/merge-pr"),
+        { match: "^api repos/o/r/pulls/42$", responses: [pr(["changes-requested"])] },
+        merge,
+      ],
+    });
+    assert.equal(status, 0, JSON.stringify(env) + stdout);
+    assert.equal(merges.length, 1);
+  }
+});
 
 test("a 405 arms auto-merge on the pinned head and exits 2", () => {
   const { status, calls, stderr } = run(["42", "--sha", HEAD], {
