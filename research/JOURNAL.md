@@ -10961,3 +10961,36 @@ record.
   packed `Counter` slot, the next cut, which `Counter`'s two arrays (an
   `f32` and a `u16` a slot) name first. `research/progress.jsonl` it349
   to it352.
+- S2-R45 | REJECTED | Charter #1922 question 2, class (b)'s rate, the
+  packed counter slot S2-A164 named as the next cut. Hypothesis: `Counter`
+  keeps a slot's `f32` probability and `u16` count in two arrays, two
+  loads and six bytes a slot per expert per bit; one `u32` a slot, the
+  `Slot` word `cm_path`'s buckets already use, halves the loads and cuts
+  the tables by a third, so the walk's decode time falls past the driver's
+  margin with train held within 0.001 of S2-A160's keeper. | Mechanism of
+  the failure: the packing costs more than it saves. Two tries, each a
+  `BitMix`-only table over `Slot` so the wired `-4` path's `Counter`
+  stayed untouched: it353 reused `Slot::update`, whose `f64::round` is a
+  libm call on baseline x86-64 (issue #1979), ratio 0.3359, 0.3401 and
+  0.3456 against main's 0.2065; it354 replaced it with truncation after
+  half a unit, ratio 0.2374, 0.2449 and 0.2440, still 15% to 19% slower
+  than main. The remainder is work the two arrays never do: a shift and an
+  integer-to-float conversion on every read, a mask, a checked
+  `u16::try_from`, a float-to-integer conversion and a repack on every
+  write (read from the source, not the disassembly). The load saved buys
+  nothing because the tables are cache-resident at this corpus's size
+  (inferred, not isolated: `perf` cannot open events on this pool). |
+  Measured, main at `7d61abe`, version 22, release build, Intel Xeon
+  Platinum 8370C runner, 219,956 literal bytes, each verdict against one
+  `measure` file of main's build (ratio **0.2065**, spread 0.5%), three
+  `verdict` runs a try, all `Some(false)`. Train mean through
+  `mothergod_bench::literal_pairing::case_delta_bpb` over
+  `baseline::cases()`: **-0.039753**, equal to S2-A160's keeper to six
+  digits, so the 22-bit probability costs no bits on these cases. No
+  sealed read: neither try is a keeper. | Verdict: **rejected**, on
+  rate; both tries deleted whole.
+  | **Not measured:** a literal stream past L2,
+  Silesia's, where two arrays missing the cache could cost what the
+  packing saves; any other CPU model; the packed slot with a fixed-point
+  update in place of `adapt`'s `f64` division, which also changes bits.
+  `research/progress.jsonl` it353 and it354.
