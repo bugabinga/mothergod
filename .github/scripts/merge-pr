@@ -67,6 +67,16 @@ moves:
   platform 403 that once enforced the rule is gone, and on 2026-10-18
   the reviewer seat landed #1363 on the app token against its own
   verdict, so the rule lives here and not in a prompt line.
+- The reviewer's seat lands only a PR its PASS is typed on: without
+  `--wait`, ROLE `reviewer` is refused unless the PR carries
+  `agent-approved` and not `changes-requested`. post-verdict judges the
+  body before it flips the pair, so a post it refuses leaves no label,
+  and the session's next line was this script anyway: on 2026-11-26 it
+  armed #2039 with no verdict on the thread and landed #2042 under
+  `changes-requested`, each verdict posted after its merge. The label is
+  read as the PR stands. This closes the refused post, not the approval
+  that survived a push, which `--wait` and stalled-prs test on the
+  timeline.
 
 - `--wait` is the foreground wait that GOVERNANCE "Merging" and the BDFL
   prompt demanded and no tool performed, so each landing hand-rolled a poll
@@ -300,6 +310,15 @@ def exit_if_landed(pr, info):
         die(f"#{pr} is {info.get('state')}, not open; nothing to merge")
 
 
+def verdict_labels(info):
+    """The reviewer's typed verdict as the PR read `info` carries it, sorted:
+    `["agent-approved"]` is a PASS and every other value is not one."""
+    return sorted(
+        label["name"] for label in info.get("labels", [])
+        if label["name"] in VERDICT_LABELS
+    )
+
+
 def describe(run):
     if run is None:
         return "not started"
@@ -358,10 +377,7 @@ def wait_for_verdict(pr, sha, timeout, interval, gates_only=False):
         if info is not None:
             run = latest.get(REVIEW_CHECK)
             review = describe(run)
-            labels = sorted(
-                label["name"] for label in info.get("labels", [])
-                if label["name"] in VERDICT_LABELS
-            )
+            labels = verdict_labels(info)
             red = red_gates(latest, contexts)
             pending = unmet_gates(latest, contexts)
             if red:
@@ -558,6 +574,12 @@ def main():
         except ApiError as err:
             die(f"reading PR #{pr} failed: {err}")
         exit_if_landed(pr, info)
+        labels = verdict_labels(info)
+        if seat == "reviewer" and labels != ["agent-approved"]:
+            die(f"#{pr} carries verdict labels {', '.join(labels) or 'none'}, so no "
+                "PASS is typed on it and nothing merges or arms: `post-verdict "
+                f"{pr} pass` did not land (it says why and moves nothing); post "
+                "it, then run this again")
         sha = pinned(sha, info["head"]["sha"])
 
     proc, status = attempt(pr, sha)
