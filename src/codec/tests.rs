@@ -790,15 +790,10 @@ fn declared_reach(encoded: &[u8]) -> Reach {
 fn encode_declares_the_wide_reach_when_a_repeat_sits_past_the_standard_window() {
     // A record, a run of zeros past the standard window, the record
     // again: only a wide match reaches the first copy.
-    let record = crate::test_support::record_text(2);
-    let mut data = record.clone();
-    data.resize(lz::WINDOW + record.len() + 4096, 0);
-    data.extend_from_slice(&record);
+    let ReachWinningSearch { data, encoded, .. } = reach_winning_search(Reach::Wide);
 
-    let encoded = encode(&data);
-
-    assert_eq!(declared_reach(&encoded), Reach::Wide);
-    assert_decode_matches(&encoded, &data, "a repeat past the standard window");
+    assert_eq!(declared_reach(encoded), Reach::Wide);
+    assert_decode_matches(encoded, data, "a repeat past the standard window");
 }
 
 #[test]
@@ -817,15 +812,10 @@ fn encode_keeps_the_standard_reach_when_the_wide_parse_buys_nothing() {
 fn encode_declares_the_far_reach_when_a_repeat_sits_past_the_wide_window() {
     // A record, a run of zeros past the wide window, the record again:
     // only a far match reaches the first copy.
-    let record = crate::test_support::record_text(2);
-    let mut data = record.clone();
-    data.resize(lz::WIDE_WINDOW + record.len() + 4096, 0);
-    data.extend_from_slice(&record);
+    let ReachWinningSearch { data, encoded, .. } = reach_winning_search(Reach::Far);
 
-    let encoded = encode(&data);
-
-    assert_eq!(declared_reach(&encoded), Reach::Far);
-    assert_decode_matches(&encoded, &data, "a repeat past the wide window");
+    assert_eq!(declared_reach(encoded), Reach::Far);
+    assert_decode_matches(encoded, data, "a repeat past the wide window");
 }
 
 #[test]
@@ -868,21 +858,26 @@ fn an_idle_thread_starting_the_wide_trial_early_never_changes_the_payload() {
     assert_eq!(reach, Reach::Wide);
 }
 
-/// The reaches a [`reach_winning_search`] input is built for: the wide one,
-/// where [`widen`] runs no far trial, and the far one, where it runs both.
-const WINNING_REACHES: [Reach; 2] = [Reach::Wide, Reach::Far];
+/// An input where the trial at `reach` wins, and what the serial [`encode`]
+/// makes of it: an early guess either way, and the far trial on whichever
+/// thread, must reproduce that result.
+struct ReachWinningSearch {
+    /// [`Reach::Wide`] or [`Reach::Far`], the reach whose trial wins.
+    reach: Reach,
+    /// A record repeated just past the window of the reach below `reach`.
+    data: Vec<u8>,
+    /// The serial [`encode`] of `data`.
+    encoded: Vec<u8>,
+    /// The narrow winner among [`filters::select::pick`]'s candidates for
+    /// `data`, as [`widen`] takes it.
+    winner: Winner,
+    /// `encoded` split at its selector: the result a serial [`search`]
+    /// writes.
+    serial: Trial,
+}
 
-/// What [`reach_winning_search`] returns: the input, the narrow winner as
-/// [`widen`] takes it, and the serial [`search`]'s result.
-type ReachWinningSearch = (Vec<u8>, Winner, (Candidate, Reach, Vec<u8>));
-
-/// Input where the trial at `reach` wins, the two candidates it is searched
-/// with, the narrow winner among them as [`widen`] takes it, and the result
-/// a serial [`search`] writes: an early guess either way, and the far trial
-/// on whichever thread, must reproduce that result. `reach` is
-/// [`Reach::Wide`] or [`Reach::Far`]: a record repeated just past the
-/// window of the reach below it.
-fn reach_winning_search(reach: Reach) -> ReachWinningSearch {
+/// The [`ReachWinningSearch`] for `reach`, [`Reach::Wide`] or [`Reach::Far`].
+fn build_reach_winning_search(reach: Reach) -> ReachWinningSearch {
     let past = match reach {
         Reach::Wide => lz::WINDOW,
         Reach::Far => lz::WIDE_WINDOW,
@@ -892,37 +887,57 @@ fn reach_winning_search(reach: Reach) -> ReachWinningSearch {
     let mut data = record.clone();
     data.resize(past + record.len() + 4096, 0);
     data.extend_from_slice(&record);
-    let candidates = [Candidate::Identity, Candidate::Reverse];
-    let serial = search(&data, &candidates, NonZeroUsize::MIN).expect("two candidates");
-    // The oracle is pinned apart from `widen`, which `search` itself calls.
+    let encoded = encode(&data);
+    let (candidate, declared, body) = split_selector(&encoded).expect("a selector");
+    let serial = (candidate, declared, body.to_vec());
+    // The oracle is pinned apart from `widen`, which `encode` itself calls.
     assert_eq!(
         serial,
-        (serial.0, reach, trial_body(&data, serial.0, reach)),
+        (candidate, reach, trial_body(&data, candidate, reach)),
         "the {reach:?} trial wins on this input"
     );
-    let index = candidates
+    // The shortlist `encode` searched, which the winner's index refers to.
+    let index = filters::select::pick(&data)
         .iter()
-        .position(|&candidate| candidate == serial.0)
+        .position(|&shortlisted| shortlisted == candidate)
         .expect("the winner is a candidate");
-    let body = encode_tokens(
-        &apply_filter(serial.0, &data),
-        serial.0.columns(),
-        Reach::Standard,
-    );
-    (data, (index, serial.0, body), serial)
+    let narrow = trial_body(&data, candidate, Reach::Standard);
+    ReachWinningSearch {
+        reach,
+        data,
+        encoded,
+        winner: (index, candidate, narrow),
+        serial,
+    }
 }
 
-/// [`reach_winning_search`] at each of [`WINNING_REACHES`], in that order,
-/// built once per test process and read by every `widen_*` test. Each
-/// entry costs a serial search of far-sized input; built per test, the
-/// three tests paid it three times, 58 s of the lib binary's 153 s (#1841).
+/// A [`ReachWinningSearch`] at each reach whose trial can win, built once
+/// per test process and read by the `widen_*` tests and the `encode` tests
+/// on the same inputs: the wide entry, where [`widen`] runs no far trial,
+/// and the far one, where it runs both. Each entry costs a serial encode of
+/// its input; built per test, the five tests paid them five times (#1841).
 static REACH_WINNING_SEARCHES: LazyLock<[ReachWinningSearch; 2]> =
-    LazyLock::new(|| WINNING_REACHES.map(reach_winning_search));
+    LazyLock::new(|| [Reach::Wide, Reach::Far].map(build_reach_winning_search));
+
+/// The [`REACH_WINNING_SEARCHES`] entry for `reach`.
+fn reach_winning_search(reach: Reach) -> &'static ReachWinningSearch {
+    REACH_WINNING_SEARCHES
+        .iter()
+        .find(|search| search.reach == reach)
+        .expect("a winning reach")
+}
 
 #[test]
 fn widen_joins_a_right_guess_and_matches_the_serial_search() {
     // On far-sized input the caller runs the far trial beside the guess.
-    for (reach, (data, winner, serial)) in WINNING_REACHES.iter().zip(&*REACH_WINNING_SEARCHES) {
+    for ReachWinningSearch {
+        reach,
+        data,
+        winner,
+        serial,
+        ..
+    } in &*REACH_WINNING_SEARCHES
+    {
         let (index, candidate, _) = *winner;
         let widened = thread::scope(|scope| {
             let handle = scope.spawn(|| trial_body(data, candidate, Reach::Wide));
@@ -940,8 +955,16 @@ fn widen_joins_a_right_guess_and_matches_the_serial_search() {
 
 #[test]
 fn widen_ignores_a_wrong_guess_and_matches_the_serial_search() {
-    for (reach, (data, winner, serial)) in WINNING_REACHES.iter().zip(&*REACH_WINNING_SEARCHES) {
-        let wrong = 1 - winner.0;
+    for ReachWinningSearch {
+        reach,
+        data,
+        winner,
+        serial,
+        ..
+    } in &*REACH_WINNING_SEARCHES
+    {
+        // Any shortlist position but the winner's is a wrong guess.
+        let wrong = usize::from(winner.0 == 0);
         let widened = thread::scope(|scope| {
             // An empty body would win were it consumed.
             let handle = scope.spawn(Vec::new);
@@ -960,7 +983,14 @@ fn widen_ignores_a_wrong_guess_and_matches_the_serial_search() {
 #[test]
 fn widen_without_a_guess_matches_the_serial_search_at_any_workers() {
     // One worker runs the far trial after the wide one, two run it beside.
-    for (reach, (data, winner, serial)) in WINNING_REACHES.iter().zip(&*REACH_WINNING_SEARCHES) {
+    for ReachWinningSearch {
+        reach,
+        data,
+        winner,
+        serial,
+        ..
+    } in &*REACH_WINNING_SEARCHES
+    {
         for workers in [1, 2] {
             let widened = thread::scope(|scope| {
                 widen(
