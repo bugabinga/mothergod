@@ -116,6 +116,12 @@ fn fresh_squash_table() -> Vec<f64> {
 }
 
 /// [`squash`] of `x` by linear interpolation in `table`.
+///
+/// `#[inline]` here and on [`apm_position`] and [`table_stretch`]: a
+/// builder of [`BitMix::walk`] in another crate sees a non-generic helper
+/// as a call, and this walk makes each of them per bit
+/// (`research/JOURNAL.md` S2-A164).
+#[inline]
 fn table_squash(table: &[f64], x: f64) -> f64 {
     let scaled =
         (x.clamp(-SQUASH_RANGE, SQUASH_RANGE - 1e-9) + SQUASH_RANGE) * SQUASH_STEPS_PER_UNIT;
@@ -170,6 +176,7 @@ fn fresh_apm_row() -> [f64; APM_BINS] {
 /// `p`'s lower APM bin and the upper bin's interpolation weight, in
 /// `[0, 1)`: the lower bin is at most `APM_BINS - 2`, so both read inside
 /// the row.
+#[inline]
 fn apm_position(table: &[f32], p: f64) -> (usize, f64) {
     let held = table_stretch(table, p).clamp(-APM_HELD, APM_HELD);
     let scaled = (held + APM_RANGE) * APM_STEPS_PER_UNIT;
@@ -191,6 +198,7 @@ fn apm_position(table: &[f32], p: f64) -> (usize, f64) {
 /// `1 / STRETCH_STEPS`. A `p` outside `[0, 1]` reads the nearest end: the
 /// float-to-integer cast saturates at zero, and `min` bounds the top (a
 /// float clamp here cost about a tenth of the walk).
+#[inline]
 fn table_stretch(table: &[f32], p: f64) -> f64 {
     #[allow(
         clippy::cast_possible_truncation,

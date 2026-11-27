@@ -47,6 +47,10 @@ const MAX_PROBABILITY: f64 = 1.0 - MIN_PROBABILITY;
 
 /// `p` clamped to `[MIN_PROBABILITY, MAX_PROBABILITY]`, the one range every
 /// probability this crate stretches or codes lives in.
+///
+/// `#[inline]` because a walk built in another crate calls it per bit
+/// (`research/JOURNAL.md` S2-A164).
+#[inline]
 pub(crate) fn clamp_probability(p: f64) -> f64 {
     p.clamp(MIN_PROBABILITY, MAX_PROBABILITY)
 }
