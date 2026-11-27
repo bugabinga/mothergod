@@ -43,7 +43,11 @@ pub const SSE_CONTEXTS: usize = (1 << LEVELS) - 1;
 ///
 /// Panics if `depth >= LEVELS` or `prefix >= 1 << depth`. The module's own walk
 /// derives both, never adversarial input.
+///
+/// `#[inline]` because a walk built in another crate calls it per bit
+/// (`research/JOURNAL.md` S2-A164).
 #[must_use]
+#[inline]
 pub fn sse_context(depth: u32, prefix: usize) -> usize {
     assert!(
         depth < LEVELS,

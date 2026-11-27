@@ -10910,4 +10910,54 @@ record.
   **accepted** (`kind: "patch"`, null deltas), a capability patch with no
   comparable benchmark. | **Not measured:** a reading on the 8573C of a
   layout-only build, so S2-A161's 8% floor is unchecked on this model.
-  `research/progress.jsonl` it348.
+  `research/progress.jsonl` it348. The first rate tries: S2-A164.
+- S2-A164 | ACCEPTED | Charter #1922 question 2, class (b)'s rate, the
+  first tries on S2-A161's driver (the BDFL's direction on #1922 of
+  2026-11-19, item 2). Hypothesis: the walk's per-bit time is arithmetic
+  width, so f32 weights and inputs, four lanes of baseline SSE where f64
+  has two, cut it past the driver's margin with train held within 0.001
+  of S2-A160's keeper. | Mechanism of the failure and the find: it349's
+  f32 walk read no faster, so the arithmetic was not the cost. Main's
+  `bit_mix_rate` disassembly then showed `BitMix::walk` calling
+  `clamp_probability` three times a bit, `table_squash`, `apm_position`
+  and `bittree::sse_context` through the GOT: the bench crate
+  instantiates the generic walk, `mothergod` builds with no LTO, and
+  those helpers are non-generic and were not `#[inline]`, each call
+  spilling the walk's live values (read from the disassembly; `perf`
+  cannot open events on this pool, so the split between spill, call and
+  decode is inferred, not isolated). `#[inline]` on the three helpers
+  private to `src/literal/bit_mix.rs` and on `clamp_probability` and
+  `sse_context`, which the default level's walk shares, leaves no call in
+  the walk but one integer `div` and the counters' `divsd`. The keeper
+  moves no bit: every train case and both sealed cases equal S2-A160's. |
+  Measured, main at `51f0998`, version 22, release build, AMD EPYC 9V74
+  runner, 219,956 literal bytes, every verdict against one `measure`
+  file of main's build, which read ratio **0.1817** (a second reading,
+  0.1826). Train mean against S2-A160's keeper, which held at
+  **-0.039753** (0.000000 on every try): it349 f32 walk, ratio 0.1843 and
+  0.1823, `Some(false)`, rejected; it350 `#[inline]` on the three local
+  helpers, 0.1744, 0.1724 and 0.1765, `Some(false)`, 3% to 5% under main and
+  short of the margin, rejected; it351 those three and `#[inline]` on
+  `clamp_probability` and `sse_context` as well, **0.1611, 0.1603 and 0.1612**, `Some(true)`,
+  candidate 50.9 to 52.0 calibration steps per literal byte against main
+  walk's 59.5 to 59.9, kept; with `clamp_probability` alone, 0.1643,
+  0.1670 and 0.1654, on the margin's edge (0.1672), so `sse_context`
+  stays; it352 the node prefix by shift in place of `lo / width`, 0.1628,
+  0.1604 and 0.1592, no move past it351's readings, rejected: the
+  division sits off the critical path (inferred, not isolated), and the
+  change was to a function the default level shares. The keeper through
+  `bit_mix::train_and_sealed_delta_bpb`: train **-0.039753**, sealed
+  `access_log` **-0.001268**, `gradient_image` **-0.250598**, each
+  case equal to S2-A160's to six digits, as `#[inline]` must give. |
+  Verdict: **accepted**, the corpus policy's, train and both sealed cases
+  unchanged and the rate keep rule `Some(true)` on one CPU model; unwired,
+  so no format change and no `decode_cost_delta`. The class reads about
+  13% fewer calibration steps a literal byte, and the rest, 51 to 52,
+  stays unattributed. | **Not measured:** any CPU but this one, so
+  S2-A161's 8% floor is unchecked here; the default level's decode with
+  `clamp_probability` and `sse_context` inline (bits equal by
+  construction, speed unread); whether a walk instantiated inside
+  `mothergod` pays those calls at all, which the wiring slice reads; the
+  packed `Counter` slot, the next cut, which `Counter`'s two arrays (an
+  `f32` and a `u16` a slot) name first. `research/progress.jsonl` it349
+  to it352.
