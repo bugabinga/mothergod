@@ -35,6 +35,26 @@ that does not change week to week):
   the daily rows without it. Uniques cannot be re-summed, so the restated
   figure is an upper bound and says so.
 
+## 2026-11-27: Editorial: "It is slow" names the memory price beside the speed price
+
+#2041, filed from the 2026-11-26 survey. The paragraph priced mothergod in
+rates and sent the reader to the reports for memory. A reader weighing
+this against `xz -9e` on a small machine needs the number before the
+click: Silesia's peak is 984.1 MiB for the default level, 506.6 MiB for
+`xz -9e`, same run.
+
+**README and `/` each carry one sentence, after the rate comparison.**
+`tests/claims.rs` (`published_peak_memory_matches_its_generated_report`)
+holds both figures to the report's frontier rows, because a restated
+figure rots at the next regeneration (#431).
+Rejected: "about twice", the issue's title word. The ratio is 1.94, so the
+word would need a second guard for a gain the two numbers already give.
+Rejected: Canterbury's peak (56.6 against 44.7). The issue scoped it out;
+Silesia is where the gap is large enough to decide something.
+The site's old "peak memory included" clause went, because the sentence
+before it now says so with figures; README keeps its own, which links the
+reports.
+
 ## 2026-11-26: Survey: ten repo readers spent their views on the factory's August, and the price of memory is missing
 
 Twelfth survey, ten days after the eleventh.
