@@ -11129,3 +11129,39 @@ record.
   decodes through, has the same lookup after its squash (a candidate for
   a bit-changing rate try there, not this class). `research/progress.jsonl`
   it357 to it359.
+- S2-R46 | REJECTED | Charter #1922 question 2, class (b)'s rate, five
+  cuts to the walk's per-node time after S2-A167, none past the driver's
+  margin. Hypothesis: the walk is a serial chain per node, so shortening it
+  by speculation (both children's inputs before the bit), by a cheaper
+  counter update, or by a cached stretch lowers decode time past the
+  margin with train unmoved. | Mechanism of the failure: none of the five
+  moves the time the way the chain model says. Speculation costs more than
+  it saves: it360, both children predicted in full, ran 37% over main's
+  ratio (0.1933 to 0.1950 against 0.1427); it361 and it362, only the
+  children's counter reads and stretches, ran 0.2202 to 0.2315 in the form
+  with a prediction helper and 0.1686 and 0.1816 flattened into the
+  closure (one reading each), so the narrower speculation is slower than
+  the full one in one form and the select (array index or `if bit`) is not
+  what separates them (the generated code is inferred, not read). Two cuts
+  to off-chain work moved nothing: it363, a reciprocal table in place of
+  `adapt`'s division, 0.1432 to 0.1446, and it364, a stretch cached per
+  slot, 0.1413 to 0.1414, a 1% gain. So the divisions and the stretch
+  lookup are not what the walk waits on, and the remaining time is the
+  squash, the mixer's dot, the APM blend and the closure's bit, which
+  S2-A166's ablation prices as parts and no cut here isolates. | Measured,
+  main at `1151c15`, version 22, release build, AMD EPYC 9V74 runner,
+  219,956 literal bytes, every verdict against one `measure` file of
+  main's build (ratio **0.1427**, spread 0.9%, margin 8.0%), three
+  `verdict` runs a try except where noted, all `Some(false)`. Train mean
+  through `mothergod_bench::literal_pairing::case_delta_bpb` over
+  `baseline::cases()` for it360, it361/it362 (flattened form), it363 and
+  it364: **-0.039739** each, equal to S2-A167's keeper to six digits, so no
+  try moves a bit on these cases (it363 multiplies where main divides and
+  still lands on the same mean). No sealed read: no try is a keeper. |
+  Verdict: **rejected**, on rate; all five deleted whole, `Counter` and
+  `BitMix` as main has them. | **Not measured:** any CPU but this one; a
+  decoder's real range-coder compare in the closure's place; the squash
+  and the mixer's dot isolated by ablation under S2-A166's closure (the
+  next cut is the squash, S2-A166's second largest part after the APM, or
+  a layout with fewer dependent loads per node); a literal stream past L2,
+  Silesia's. `research/progress.jsonl` it360 to it364.
