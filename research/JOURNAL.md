@@ -11036,3 +11036,51 @@ record.
   `a * b + c` is a format change under hard rule 5 and an inline FMA needs
   the `#[target_feature]` dispatch ADR-0053 keeps closed.
   `research/progress.jsonl` it355.
+- S2-A166 | ACCEPTED | Charter #1922 question 2, class (b)'s rate driver
+  corrected: S2-A161's closure read each node's bit from the literal's own
+  byte, so the walk's nodes could overlap in the core, and a decoder's
+  cannot. Hypothesis: the decoder's bit is a function of the node's
+  probability, and the next node's slot index hangs on the bit, so the
+  walk's 8 nodes are one serial chain; a bit that depends on `p` in the
+  data times that chain, and reads the class slower than the driver did
+  while the champion, whose per-node work is long, moves little. |
+  Mechanism: `bench/src/bit_mix.rs`'s `resolve` returns `(byte >= mid) ^
+  p.is_nan()`. `p` is never NaN, so no bit moves and every walk still
+  lands its byte; the compiler cannot prove it, so the bit keeps a data
+  dependency on the probability, the shape of a range coder's compare. The
+  `xor` is a lower bound on a decoder's chain (an unordered compare, a set
+  and an xor; a decoder's quantize, multiply and compare is longer), so
+  the reading is still an under-read, now by less. | Measured, release
+  build, AMD EPYC 9V74 runner, 219,956 literal bytes, `bit_mix_rate
+  measure`, main at `79176fb`. Old closure: champion 2,056 to 2,057 ns a
+  literal byte, candidate 326.7 to 327.2, ratio **0.1588 to 0.1591**
+  (calibration steps 322.7 and 51.3). New closure: champion 2,135 to 2,141,
+  candidate **456.6 to 457.2**, ratio **0.2134 to 0.2140**, and 0.2147 and
+  0.2155 in two later processes (steps 339.2 and 72.8). The class's walk
+  costs 40% more than S2-A161 to S2-A164 read, the champion's 4% more.
+  Against S2-R43's literal budget (147 ns, read on an EPYC 9V45) the class
+  is about **3.1x over**, where S2-A160 and S2-A164 read about 2.2x.
+  Floor, a layout-only build (an uncalled non-inline function added to
+  `src/literal/bit_mix.rs`) against the new champion file: ratio 0.2145,
+  0.2150 and 0.2157 against 0.2147, `Some(false)` each, within 0.5%, so
+  S2-A161's 8% floor is not contradicted on this model (a lower bound, as
+  there). Ablations, each deleting one part from the walk (a scratch
+  edit, no try), ns a literal byte of the candidate, old closure then new:
+  no APM 264.9 then 339.1 (-62, **-117**); no counter updates 251.0 then
+  368.3 (-76, -88); no mixer update 317.4 then 423.5 (-10, -32); the whole
+  walk 327.1 then 456.0. Under the chain the APM is the largest single
+  part, 26% of the walk: its stretch of the squashed `p` waits on the
+  squash, and its row interpolation on that. | Verdict: **accepted**
+  (`kind: "patch"`, null deltas), the capability test passing: a NaN
+  probability flips the bit and a real one equals the byte split. No codec
+  code moved, so no bits and no `decode_cost_delta`. Consequence: every
+  ratio S2-A161 to S2-A164 and S2-R45 printed was read under the old
+  closure; their verdicts stand as measured, and none is re-read here.
+  Rate tries after this one are judged against a champion file measured
+  under the new closure. | **Not measured:** the chain in a real decoder
+  (a range coder's compare in place of the `xor`); the Xeon and 7763
+  floors under the new closure; S2-A164's it351 under it; the APM's
+  position from the mixer's `dot` (which equals `stretch(p)` before the
+  squash and the clamp) in place of a second table lookup after the
+  squash, the first cut the ablation names, which moves bits and so needs
+  the train bound. `research/progress.jsonl` it356.

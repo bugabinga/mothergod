@@ -90,9 +90,17 @@ trait RateWalk {
 /// through [`black_box`]: a decoder reads it in its range coder, and a walk
 /// that discards it lets the compiler delete the work that computes it, so
 /// the clock would time a walk no decoder runs.
+///
+/// The bit also depends on `p` in the data, as a decoder's does: its range
+/// coder compares against `p`, and the next node's slot index hangs on the
+/// bit, so one node's work waits on the last. A bit read from `byte` alone
+/// lets the core overlap neighbouring nodes and times the walk's throughput,
+/// which under-read the class (b) walk's decode time
+/// (`research/JOURNAL.md` S2-A166). `p` is never NaN, so the `xor` changes
+/// no bit; the compiler cannot prove that, so it keeps the dependency.
 fn resolve(byte: u8, mid: usize, p: f64) -> bool {
     black_box(p);
-    usize::from(byte) >= mid
+    (usize::from(byte) >= mid) ^ p.is_nan()
 }
 
 /// [`champion`]'s walk without its pricing.
@@ -530,6 +538,16 @@ mod tests {
 
         fn walk_byte(&mut self, _: Context, byte: u8) -> u8 {
             byte.wrapping_add(1)
+        }
+    }
+
+    #[test]
+    fn a_resolved_bit_depends_on_the_probability_and_splits_at_the_midpoint_for_a_real_one() {
+        for byte in [0u8, 127, 128, 255] {
+            for mid in [1usize, 128, 255] {
+                assert_eq!(resolve(byte, mid, 0.5), usize::from(byte) >= mid);
+                assert_ne!(resolve(byte, mid, f64::NAN), resolve(byte, mid, 0.5));
+            }
         }
     }
 
