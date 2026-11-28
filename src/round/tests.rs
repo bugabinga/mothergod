@@ -45,6 +45,9 @@ fn the_precondition_limit_edge_rounds_as_f64_round_does() {
     }
 }
 
+// The guard is a `debug_assert!`; a release test build, the packaged crate's
+// (`.github/scripts/package-test`), has nothing to panic.
+#[cfg(debug_assertions)]
 #[test]
 #[should_panic(expected = "nearest: |x| must stay below 2^52")]
 fn a_value_past_the_limit_fails_a_debug_build() {
