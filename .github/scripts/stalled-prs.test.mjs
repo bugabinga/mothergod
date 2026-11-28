@@ -39,7 +39,7 @@ function call(fn, subject, now, extra = {}) {
 }
 
 function classify(pr, now = NOW, extra = {}) {
-  return call("classify", pr, now, extra);
+  return call("classify", pr, now, { required: GATE_NAMES, ...extra });
 }
 
 function classifyBranch(branch, now = NOW) {
@@ -59,7 +59,9 @@ function check(name, conclusion, extra = {}) {
   };
 }
 
-const GREEN_GATES = ["fmt", "clippy", "test", "doc", "ratio", "worker"].map((n) => check(n, "SUCCESS"));
+// Any list works: the script reads the real one from the ruleset per sweep.
+const GATE_NAMES = ["fmt", "clippy", "test", "doc", "ratio", "worker", "em-dash", "package"];
+const GREEN_GATES = GATE_NAMES.map((n) => check(n, "SUCCESS"));
 
 function review(conclusion, extra = {}) {
   return check("review", conclusion, {
@@ -196,7 +198,7 @@ test("a required gate missing by name names it, and doubts itself first", () => 
   );
   assert.equal(found.kind, "never-fired");
   assert.match(found.detail, /ratio/);
-  assert.match(found.rescue, /renamed in branch protection/);
+  assert.match(found.rescue, /renamed away from its ruleset context/);
 });
 
 test("a red gate is not a stall: its author owns the next move", () => {
@@ -525,14 +527,14 @@ mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
 now = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
 case = json.loads(sys.argv[3])
-found = mod.classify(case["pr"], now, case.get("drift"), case.get("files"))
+found = mod.classify(case["pr"], now, case["required"], case.get("drift"), case.get("files"))
 print(json.dumps({"found": found, "plan": mod.plan(case["pr"], found, now, case.get("files"), case.get("approved_at"))}))
 `;
 
 function planFor(pr, extra = {}, now = NOW) {
   const run = spawnSync(
     "python3",
-    ["-c", planDriver, scriptsDir, now, JSON.stringify({ pr, ...extra })],
+    ["-c", planDriver, scriptsDir, now, JSON.stringify({ pr, required: GATE_NAMES, ...extra })],
     { encoding: "utf8" },
   );
   assert.equal(run.status, 0, run.stderr);
@@ -698,7 +700,7 @@ now = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
 case = json.loads(sys.argv[3])
 out = {"approved_at": mod.approved_at(571, "{owner}/{repo}"), "changed_files": mod.changed_files(571)}
 if "pr" in case:
-    found = mod.classify(case["pr"], now)
+    found = mod.classify(case["pr"], now, case["required"])
     out["rescue"] = mod.rescue(case["pr"], found, now)
 print(json.dumps(out))
 `;
@@ -711,7 +713,7 @@ function withGh(script, extra = {}, now = NOW) {
   chmodSync(join(dir, "gh"), 0o755);
   const run = spawnSync(
     "python3",
-    ["-c", readsDriver, scriptsDir, now, JSON.stringify(extra)],
+    ["-c", readsDriver, scriptsDir, now, JSON.stringify({ required: GATE_NAMES, ...extra })],
     { encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env.PATH}` } },
   );
   assert.equal(run.status, 0, run.stderr);
