@@ -7,6 +7,8 @@
 //! [`Decoder`] reads a stream shorter than it expects as implicit trailing
 //! zero bits, never a panic (hard rule 2, `CLAUDE.md`).
 
+use crate::round::nearest;
+
 /// The coder's `[low, high]` interval is `[0, TOP)`. `u64` arithmetic keeps
 /// every intermediate (`range * total`) from overflowing as long as `total`
 /// fits in 32 bits.
@@ -309,14 +311,13 @@ fn quantize_probability(probability_of_one: f64) -> u64 {
     )]
     let scale = BIT_SCALE as f64;
     #[allow(
-        clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
         reason = "probability_of_one.clamp(0.0, 1.0) * scale is in [0.0, scale]: rounds to a \
-                  value that always fits u64, and a NaN input (clamp leaves NaN as NaN, per its \
-                  docs) casts to 0 under Rust's defined float-to-int cast semantics, which the \
-                  clamp below still bounds away from 0 and BIT_SCALE"
+                  non-negative value, and a NaN input (clamp leaves NaN as NaN, per its docs) \
+                  rounds to 0 under `nearest`, which the clamp below still bounds away from 0 \
+                  and BIT_SCALE"
     )]
-    let scaled = (probability_of_one.clamp(0.0, 1.0) * scale).round() as u64;
+    let scaled = nearest(probability_of_one.clamp(0.0, 1.0) * scale) as u64;
     scaled.clamp(1, BIT_SCALE - 1)
 }
 

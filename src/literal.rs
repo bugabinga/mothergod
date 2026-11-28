@@ -39,6 +39,7 @@ use crate::Rate;
 use crate::bittree;
 use crate::coder::{Decoder, Encoder};
 use crate::logistic::{squash, stretch};
+use crate::round::nearest;
 use crate::sse::{LogitSse, Sse, clamp_probability};
 
 /// Number of context predictors blended for every literal byte.
@@ -119,7 +120,7 @@ const MIN_DENOMINATOR: f64 = 1e-9;
 const EXP_ARG_LIMIT: f64 = 30.0;
 
 /// `e^x`, built from IEEE-754 basic operations only (`+ - * /`,
-/// comparisons, and [`f64::round`]): no libm transcendental call, so
+/// comparisons, and [`nearest`]): no libm call at all, so
 /// [`Literal::update`] computes the identical mixing weight on every
 /// platform whether it runs on the encode or the decode path (ADR-0024).
 ///
@@ -132,8 +133,12 @@ const EXP_ARG_LIMIT: f64 = 30.0;
 /// doubling (`pow2`), never a `powi` call.
 pub(crate) fn exp(x: f64) -> f64 {
     let x = x.clamp(-EXP_ARG_LIMIT, EXP_ARG_LIMIT);
-    let k = (x / std::f64::consts::LN_2).round();
-    let r = x - k * std::f64::consts::LN_2;
+    let k = nearest(x / std::f64::consts::LN_2);
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "|k| <= 44 (see the cast below): exact in f64"
+    )]
+    let r = x - k as f64 * std::f64::consts::LN_2;
     let poly = 1.0
         + r * (1.0
             + r * (1.0 / 2.0

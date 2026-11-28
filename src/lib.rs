@@ -46,6 +46,7 @@ pub mod logistic;
 pub mod lz;
 pub(crate) mod model;
 pub mod read;
+pub(crate) mod round;
 pub(crate) mod sse;
 pub mod write;
 
