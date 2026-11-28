@@ -38,10 +38,6 @@ pub fn ln(x: f64) -> f64 {
     let biased = i64::try_from(bits >> MANTISSA_BITS).expect("an 11-bit exponent fits i64");
     let mut k = biased - EXPONENT_BIAS;
     // Mantissa in [1, 2): same fraction bits, exponent field set to 0.
-    #[allow(
-        clippy::cast_sign_loss,
-        reason = "EXPONENT_BIAS is a positive constant, the cast is lossless"
-    )]
     let mut m = f64::from_bits((bits & MANTISSA_MASK) | ((EXPONENT_BIAS as u64) << MANTISSA_BITS));
     if m > std::f64::consts::SQRT_2 {
         m /= 2.0;
