@@ -282,16 +282,20 @@ def finding(kind, detail, rescue, review=None, ended=None, started=None):
 def required_names():
     """The status-check contexts main's rulesets require, in ruleset order.
 
-    Dies through gh() when unread: a sweep that guessed the gate list would
-    call a red PR green, which is worse than no sweep.
+    Dies when unread, and when the read is empty: with no gate list every PR
+    past GRACE would read as never-fired, hiding its real finding, and a
+    sweep that guesses is worse than no sweep (PR #2053's review).
     """
     rules = json.loads(gh("api", "repos/{owner}/{repo}/rules/branches/main"))
-    return [
+    names = [
         check["context"]
         for rule in rules
         if rule["type"] == "required_status_checks"
         for check in rule["parameters"]["required_status_checks"]
     ]
+    if not names:
+        die("main's rulesets require no status check; read the `gate` ruleset before trusting a sweep")
+    return names
 
 
 def required_gates(pr, required):

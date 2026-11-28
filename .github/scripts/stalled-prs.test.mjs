@@ -59,8 +59,24 @@ function check(name, conclusion, extra = {}) {
   };
 }
 
-// Any list works: the script reads the real one from the ruleset per sweep.
-const GATE_NAMES = ["fmt", "clippy", "test", "doc", "ratio", "worker", "em-dash", "package"];
+// main's rules as `gh api repos/{owner}/{repo}/rules/branches/main` returned
+// them on 2026-11-28, trimmed to one rule of each shape; the script reads the
+// live one per sweep, and the classify tests take their gate list from here.
+const RULESET = [
+  { type: "non_fast_forward", ruleset_id: 21106663 },
+  {
+    type: "required_status_checks",
+    ruleset_id: 21106663,
+    parameters: {
+      do_not_enforce_on_create: true,
+      required_status_checks: ["test", "doc", "clippy", "fmt", "ratio", "worker", "em-dash", "package"].map(
+        (context) => ({ context }),
+      ),
+      strict_required_status_checks_policy: false,
+    },
+  },
+];
+const GATE_NAMES = RULESET[1].parameters.required_status_checks.map((c) => c.context);
 const GREEN_GATES = GATE_NAMES.map((n) => check(n, "SUCCESS"));
 
 function review(conclusion, extra = {}) {
@@ -767,4 +783,44 @@ test("rescue() on a timeline that did not read holds, prints why, and returns", 
   assert.equal(printed.length, 1);
   assert.match(printed[0], /^ {8}held: the agent-approved label event did not read/);
   assert.match(printed[0], new RegExp(`merge-pr 377 --sha ${HEAD}`));
+});
+
+const requiredDriver = `
+import importlib.machinery, importlib.util, json, sys
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("stalled_prs", sys.argv[1] + "/stalled-prs")
+spec = importlib.util.spec_from_loader("stalled_prs", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+print(json.dumps(mod.required_names()))
+`;
+
+// required_names() with a gh on PATH that prints `body` for the rules read.
+function requiredWith(body) {
+  const dir = mkdtempSync(join(tmpdir(), "stalled-prs-rules-"));
+  writeFileSync(
+    join(dir, "gh"),
+    `#!/bin/sh\n[ "$2" = "repos/{owner}/{repo}/rules/branches/main" ] || { echo "unexpected: $*" >&2; exit 9; }\necho '${
+      JSON.stringify(body)
+    }'\n`,
+  );
+  chmodSync(join(dir, "gh"), 0o755);
+  return spawnSync("python3", ["-c", requiredDriver, scriptsDir], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+  });
+}
+
+test("required_names reads the contexts of the status-check rule, in ruleset order", () => {
+  const run = requiredWith(RULESET);
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(JSON.parse(run.stdout), GATE_NAMES);
+});
+
+test("a ruleset that requires no check ends the sweep instead of calling every PR never-fired", () => {
+  for (const body of [[], [RULESET[0]]]) {
+    const run = requiredWith(body);
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr, /require no status check/);
+  }
 });
