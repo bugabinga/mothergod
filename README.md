@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="mothergod — chevrons compressing the golden byte" width="180"/>
+  <img src="assets/logo.svg" alt="mothergod: chevrons compressing the golden byte" width="180"/>
 </p>
 
 # mothergod

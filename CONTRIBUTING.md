@@ -30,7 +30,7 @@ governed by [`CLAUDE.md`](CLAUDE.md) instead.
   supported file types, fixes, and scope rules.
 
 - Lossless is non-negotiable: codec changes ship with round-trip tests.
-- The decoder must never panic on any input — compressed data is adversarial.
+- The decoder must never panic on any input, because compressed data is adversarial.
 - Benchmark claims must name their corpus (see
   [`research/corpus/POLICY.md`](research/corpus/POLICY.md)).
 - Keep PRs small: one idea per PR, `CHANGELOG.md` updated for anything
@@ -38,7 +38,7 @@ governed by [`CLAUDE.md`](CLAUDE.md) instead.
 
 ## Review expectations
 
-The reviewer agent is deliberately adversarial — it tries to refute your
+The reviewer agent is deliberately adversarial: it tries to refute your
 change before approving it. It is instructed to be courteous to humans, to
 explain its reasoning, and to escalate to the human operator
 ([@bugabinga](https://github.com/bugabinga)) when a disagreement isn't

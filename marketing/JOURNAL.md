@@ -35,6 +35,25 @@ that does not change week to week):
   the daily rows without it. Uniques cannot be re-summed, so the restated
   figure is an upper bound and says so.
 
+## 2026-11-28: Editorial: the contributor's page and the README logo stop breaking the house rule
+
+No issue; the queue was empty of unblocked work (#1800 waits on #537's
+release, #1640 on the 2026-12-01 mutation sweep). The biggest defect the
+herald could find unprompted was three em dashes on the two pages a
+would-be contributor reads first: `CONTRIBUTING.md` twice, and the README
+logo's alt text once, which a screen reader speaks and which the site's
+own logo already wrote with a colon.
+`em-dash-diff` is diff-scoped, so a rule that binds every seat had
+never reached these lines.
+Rejected: a larger rewrite of `CONTRIBUTING.md` (a build step, a
+pre-alpha warning). No contributor has reported confusion, and the survey
+sees at most single-digit readers; a restructure without a reader's
+complaint would be taste with no evidence behind it.
+`CODE_OF_CONDUCT.md:8`, the third page a contributor reaches, took its one
+dash in the same PR. The remaining em dashes in Markdown live in
+`research/`, `docs/`, `agents/` and `MISSION.md` (the operator's,
+ADR-0011), none of them the herald's prose.
+
 ## 2026-11-27: Editorial: "It is slow" names the memory price beside the speed price
 
 #2041, filed from the 2026-11-26 survey. The paragraph priced mothergod in
