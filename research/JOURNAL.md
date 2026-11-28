@@ -11084,3 +11084,48 @@ record.
   squash and the clamp) in place of a second table lookup after the
   squash, the first cut the ablation names, which moves bits and so needs
   the train bound. `research/progress.jsonl` it356.
+- S2-A167 | ACCEPTED | Charter #1922 question 2, class (b)'s rate, the
+  APM cut S2-A166 named first. Hypothesis: the walk's 8 nodes are one
+  serial chain, so reading the APM's bin position from the mixer's
+  weighted sum, `stretch(p)` before the squash and the clamp, in place of
+  a table stretch of the squashed and clamped `p`, takes the squash and a
+  lookup off the chain and lowers decode time past the rate driver's
+  margin with train held within 0.001 of S2-A164's keeper. | Mechanism:
+  `apm_position` takes the stretch as an argument and `BitMix::walk` passes
+  `dot`. Before, the APM's index waited on the squash, the clamp, a
+  float-to-integer cast and a table load, and the coded probability waited
+  on the index; now the APM's row load and the squash run side by side
+  from `dot`. The saving, about 150 ns a literal byte, is more than
+  S2-A166's ablation of the whole APM (-117), because the ablation left
+  the squash and the clamp on the chain, so the lookup after them was
+  worth more than the row read (inferred, not isolated: `perf` cannot
+  open events on this pool). `p` and `dot` differ only where the clamp
+  binds, so bits move by rounding: train mean **-0.039739** against
+  S2-A164's keeper at **-0.039753**. | Measured, main at `c2fc406`,
+  version 22, release build, AMD EPYC 9V74 runner, 219,956 literal bytes,
+  under S2-A166's closure, every verdict against one `measure` file of
+  main's build, which read ratio **0.2138**, spread 0.2%. Kept: it357,
+  ratio **0.1448, 0.1439 and 0.1439**, `Some(true)` each; the candidate
+  walk costs 308.7 to 308.9 ns a literal byte (a second `measure` of the
+  keeper, ratio 0.1442) against 457.2 to 457.9. The keeper through
+  `bit_mix::train_and_sealed_delta_bpb`: train **-0.039739**, sealed
+  `access_log` **-0.001268**, `gradient_image` **-0.250620** (S2-A164's:
+  -0.001268, -0.250598); the eleven train cases each within 0.00016 of
+  S2-A164's (`entropy_ladder_h6` moves most, +0.00015). Reverted, each
+  against it357's file: it358 the dot summed as a balanced tree, ratio
+  0.1416, 0.1436 and 0.1427, `Some(false)`, train equal; it359 the squash
+  read at the nearest entry with no interpolation, 0.1424, 0.1427 and
+  0.1434, `Some(false)`, train +0.000005. Against S2-R43's literal budget
+  (147 ns, read on an EPYC 9V45) the class is about **2.1x over**, from
+  3.1x. | Verdict: **accepted**, the corpus policy's: train within the
+  bound, both sealed cases no worse, the rate keep rule `Some(true)` on
+  one CPU model; unwired, so no format change and no `decode_cost_delta`.
+  The two reverts say the remaining chain is not add latency or
+  interpolation; the squash, the counters' reads and the closure's bit
+  stay unattributed. | **Not measured:** any CPU but this one, so
+  S2-A161's 8% floor is unchecked here; Silesia's literal stream; the
+  chain in a real decoder (a range coder's compare in place of the
+  `xor`); whether the champion's own walk, which the default level
+  decodes through, has the same lookup after its squash (a candidate for
+  a bit-changing rate try there, not this class). `research/progress.jsonl`
+  it357 to it359.
