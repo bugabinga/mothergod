@@ -102,10 +102,6 @@ const _: () = assert!(
 /// output bytes, and below them [`encode`]'s one byte at least does.
 pub const MAX_EXPANSION: u32 = 4096;
 
-#[allow(
-    clippy::cast_lossless,
-    reason = "f64::from is not const; a u32 converts to f64 exactly"
-)]
 const _: () = assert!(
     MIN_PROBABILITY == 1.0 / MAX_EXPANSION as f64,
     "the outer mixer's clamp is the floor `MAX_EXPANSION`'s invariant derives from"
