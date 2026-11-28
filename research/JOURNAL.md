@@ -11138,7 +11138,7 @@ record.
   moves the time the way the chain model says. Speculation costs more than
   it saves: it360, both children predicted in full, ran 37% over main's
   ratio (0.1933 to 0.1950 against 0.1427); it361 and it362, only the
-  children's counter reads and stretches, ran 0.2202 to 0.2315 in the form
+  children's counter reads and stretches, ran 0.2202 to 0.2314 in the form
   with a prediction helper and 0.1686 and 0.1816 flattened into the
   closure (one reading each), so the narrower speculation is slower than
   the full one in one form and the select (array index or `if bit`) is not
