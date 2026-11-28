@@ -174,10 +174,9 @@ from verdict import approved_at, round_started
 
 from anchor import STAMP, gh, iso, stamp_to_dt
 
-# The required checks, from CLAUDE.md "Commands (run before any push)". A gate
-# renamed in branch protection and not here reads as `never-fired` on every
-# PR, which is loud on the first run rather than silent forever.
-REQUIRED_GATES = ("fmt", "clippy", "test", "doc", "ratio", "worker")
+# The required checks are read from main's ruleset each sweep (required_names),
+# never copied here: the copy this replaced had missed em-dash for weeks and
+# would have missed package, the gate #2051 merged red past.
 
 # The reviewer's own check, addressed by workflow AND job name because `changes`
 # proves a bare job name is not unique across workflows in this repository.
@@ -280,10 +279,29 @@ def finding(kind, detail, rescue, review=None, ended=None, started=None):
     return found
 
 
-def required_gates(pr):
-    """The newest run of each required gate on the head, in REQUIRED_GATES order."""
+def required_names():
+    """The status-check contexts main's rulesets require, in ruleset order.
+
+    Dies when unread, and when the read is empty: with no gate list every PR
+    past GRACE would read as never-fired, hiding its real finding, and a
+    sweep that guesses is worse than no sweep (PR #2053's review).
+    """
+    rules = json.loads(gh("api", "repos/{owner}/{repo}/rules/branches/main"))
+    names = [
+        check["context"]
+        for rule in rules
+        if rule["type"] == "required_status_checks"
+        for check in rule["parameters"]["required_status_checks"]
+    ]
+    if not names:
+        die("main's rulesets require no status check; read the `gate` ruleset before trusting a sweep")
+    return names
+
+
+def required_gates(pr, required):
+    """The newest run of each gate named in `required` on the head, in that order."""
     by_name = latest(pr["statusCheckRollup"] or [], lambda c: c["name"])
-    return [by_name[name] for name in REQUIRED_GATES if name in by_name]
+    return [by_name[name] for name in required if name in by_name]
 
 
 def suppress(pr):
@@ -311,9 +329,10 @@ def needs_bdfl(pr, files, move, **when):
     )
 
 
-def classify(pr, now, drift=None, files=None):
+def classify(pr, now, required, drift=None, files=None):
     """Return the one finding for this PR, or None. Pure: no network, no clock.
 
+    `required` is required_names(), the gate names the ruleset enforces.
     `drift` is the caller's one network read for a red head, {"sha", "behind_by"}
     against main's newest green push run, or None when unread, which keeps
     red-from-drift inert rather than wrong. `files` is the caller's one read
@@ -330,7 +349,7 @@ def classify(pr, now, drift=None, files=None):
 
     rollup = pr["statusCheckRollup"] or []
     by_job = latest(rollup, lambda c: (c.get("workflowName"), c["name"]))
-    gates = required_gates(pr)
+    gates = required_gates(pr, required)
 
     if not gates:
         born = datetime.strptime(iso(pr["createdAt"]), STAMP).replace(
@@ -384,14 +403,14 @@ def classify(pr, now, drift=None, files=None):
         # verdict case). The heartbeat skips every `.claude/` PR in its
         # duty 1, so an unreported red one here would be nobody's.
         return needs_bdfl(pr, files, f"{names} red", ended=ended)
-    if len(gates) < len(REQUIRED_GATES):
+    if len(gates) < len(required):
         present = {gate["name"] for gate in gates}
-        missing = ", ".join(n for n in REQUIRED_GATES if n not in present)
+        missing = ", ".join(n for n in required if n not in present)
         return finding(
             "never-fired",
             f"required gate(s) absent on the head SHA: {missing}",
-            "confirm the gate was not renamed in branch protection before rescuing; "
-            "REQUIRED_GATES in this script is the copy that goes stale",
+            "confirm the gate's job was not renamed away from its ruleset context "
+            "before rescuing",
         )
 
     if (pr.get("author") or {}).get("login") == DEPENDABOT and not labels & VERDICT_LABELS:
@@ -757,12 +776,13 @@ def main():
     # One read of main per sweep, one compare per red head: the drift
     # signature costs nothing on a green queue.
     green = green_main()
+    required = required_names()
     rows = []
     for pr in pulls:
         drift = None
         files = None
         if not suppress(pr):
-            red = any(gate["conclusion"] in DEAD for gate in required_gates(pr))
+            red = any(gate["conclusion"] in DEAD for gate in required_gates(pr, required))
             if green and red:
                 drift = drift_of(green, pr["headRefOid"])
             # One file read per PR whose signature keys on paths: a dependabot
@@ -770,7 +790,7 @@ def main():
             returned = any(label["name"] == "changes-requested" for label in pr["labels"])
             if (pr.get("author") or {}).get("login") == DEPENDABOT or red or returned:
                 files = changed_files(pr["number"])
-        rows.append((pr, classify(pr, now, drift, files)))
+        rows.append((pr, classify(pr, now, required, drift, files)))
     branch_rows, branches = orphans({pr["headRefName"] for pr in pulls}, now)
     render(
         [(pr, found) for pr, found in rows if found],

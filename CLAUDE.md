@@ -35,8 +35,11 @@ CI enforces the same gate as the required checks `fmt`, `clippy`, `test`,
 (CI-only; run it locally with `cargo run -p mothergod-bench --release --bin
 baseline_gate -- check` before pushing a codec change), and `worker`, the
 node tests under `infra/` and `.github/`, prompt pins included: a prompt
-edit moves its pin in `.github/scripts/prompt-bytes` in the same diff. A
-push that fails them wastes a cycle.
+edit moves its pin in `.github/scripts/prompt-bytes` in the same diff;
+`package`, the published crate's own tests run from its tarball under
+`--release`, where a `debug_assert!` compiles out (#2051); and `em-dash`.
+main's ruleset is the list; `stalled-prs` reads it there. A push that
+fails them wastes a cycle.
 
 ## Hard rules
 

@@ -39,7 +39,7 @@ function call(fn, subject, now, extra = {}) {
 }
 
 function classify(pr, now = NOW, extra = {}) {
-  return call("classify", pr, now, extra);
+  return call("classify", pr, now, { required: GATE_NAMES, ...extra });
 }
 
 function classifyBranch(branch, now = NOW) {
@@ -59,7 +59,25 @@ function check(name, conclusion, extra = {}) {
   };
 }
 
-const GREEN_GATES = ["fmt", "clippy", "test", "doc", "ratio", "worker"].map((n) => check(n, "SUCCESS"));
+// main's rules as `gh api repos/{owner}/{repo}/rules/branches/main` returned
+// them on 2026-11-28, trimmed to one rule of each shape; the script reads the
+// live one per sweep, and the classify tests take their gate list from here.
+const RULESET = [
+  { type: "non_fast_forward", ruleset_id: 21106663 },
+  {
+    type: "required_status_checks",
+    ruleset_id: 21106663,
+    parameters: {
+      do_not_enforce_on_create: true,
+      required_status_checks: ["test", "doc", "clippy", "fmt", "ratio", "worker", "em-dash", "package"].map(
+        (context) => ({ context }),
+      ),
+      strict_required_status_checks_policy: false,
+    },
+  },
+];
+const GATE_NAMES = RULESET[1].parameters.required_status_checks.map((c) => c.context);
+const GREEN_GATES = GATE_NAMES.map((n) => check(n, "SUCCESS"));
 
 function review(conclusion, extra = {}) {
   return check("review", conclusion, {
@@ -196,7 +214,7 @@ test("a required gate missing by name names it, and doubts itself first", () => 
   );
   assert.equal(found.kind, "never-fired");
   assert.match(found.detail, /ratio/);
-  assert.match(found.rescue, /renamed in branch protection/);
+  assert.match(found.rescue, /renamed away from its ruleset context/);
 });
 
 test("a red gate is not a stall: its author owns the next move", () => {
@@ -525,14 +543,14 @@ mod = importlib.util.module_from_spec(spec)
 loader.exec_module(mod)
 now = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
 case = json.loads(sys.argv[3])
-found = mod.classify(case["pr"], now, case.get("drift"), case.get("files"))
+found = mod.classify(case["pr"], now, case["required"], case.get("drift"), case.get("files"))
 print(json.dumps({"found": found, "plan": mod.plan(case["pr"], found, now, case.get("files"), case.get("approved_at"))}))
 `;
 
 function planFor(pr, extra = {}, now = NOW) {
   const run = spawnSync(
     "python3",
-    ["-c", planDriver, scriptsDir, now, JSON.stringify({ pr, ...extra })],
+    ["-c", planDriver, scriptsDir, now, JSON.stringify({ pr, required: GATE_NAMES, ...extra })],
     { encoding: "utf8" },
   );
   assert.equal(run.status, 0, run.stderr);
@@ -698,7 +716,7 @@ now = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
 case = json.loads(sys.argv[3])
 out = {"approved_at": mod.approved_at(571, "{owner}/{repo}"), "changed_files": mod.changed_files(571)}
 if "pr" in case:
-    found = mod.classify(case["pr"], now)
+    found = mod.classify(case["pr"], now, case["required"])
     out["rescue"] = mod.rescue(case["pr"], found, now)
 print(json.dumps(out))
 `;
@@ -711,7 +729,7 @@ function withGh(script, extra = {}, now = NOW) {
   chmodSync(join(dir, "gh"), 0o755);
   const run = spawnSync(
     "python3",
-    ["-c", readsDriver, scriptsDir, now, JSON.stringify(extra)],
+    ["-c", readsDriver, scriptsDir, now, JSON.stringify({ required: GATE_NAMES, ...extra })],
     { encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env.PATH}` } },
   );
   assert.equal(run.status, 0, run.stderr);
@@ -765,4 +783,44 @@ test("rescue() on a timeline that did not read holds, prints why, and returns", 
   assert.equal(printed.length, 1);
   assert.match(printed[0], /^ {8}held: the agent-approved label event did not read/);
   assert.match(printed[0], new RegExp(`merge-pr 377 --sha ${HEAD}`));
+});
+
+const requiredDriver = `
+import importlib.machinery, importlib.util, json, sys
+sys.path.insert(0, sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("stalled_prs", sys.argv[1] + "/stalled-prs")
+spec = importlib.util.spec_from_loader("stalled_prs", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+print(json.dumps(mod.required_names()))
+`;
+
+// required_names() with a gh on PATH that prints `body` for the rules read.
+function requiredWith(body) {
+  const dir = mkdtempSync(join(tmpdir(), "stalled-prs-rules-"));
+  writeFileSync(
+    join(dir, "gh"),
+    `#!/bin/sh\n[ "$2" = "repos/{owner}/{repo}/rules/branches/main" ] || { echo "unexpected: $*" >&2; exit 9; }\necho '${
+      JSON.stringify(body)
+    }'\n`,
+  );
+  chmodSync(join(dir, "gh"), 0o755);
+  return spawnSync("python3", ["-c", requiredDriver, scriptsDir], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+  });
+}
+
+test("required_names reads the contexts of the status-check rule, in ruleset order", () => {
+  const run = requiredWith(RULESET);
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(JSON.parse(run.stdout), GATE_NAMES);
+});
+
+test("a ruleset that requires no check ends the sweep instead of calling every PR never-fired", () => {
+  for (const body of [[], [RULESET[0]]]) {
+    const run = requiredWith(body);
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr, /require no status check/);
+  }
 });
