@@ -122,6 +122,47 @@ fn reference_exp(x: f64) -> f64 {
     }
 }
 
+/// `exp` as it stood before `nearest` replaced `f64::round`, kept as the
+/// oracle that the swap moved no bit (`#[cfg(test)]` keeps the libm call
+/// off the decode path).
+fn exp_through_f64_round(x: f64) -> f64 {
+    let x = x.clamp(-EXP_ARG_LIMIT, EXP_ARG_LIMIT);
+    let k = (x / std::f64::consts::LN_2).round();
+    let r = x - k * std::f64::consts::LN_2;
+    let poly = 1.0
+        + r * (1.0
+            + r * (1.0 / 2.0
+                + r * (1.0 / 6.0
+                    + r * (1.0 / 24.0
+                        + r * (1.0 / 120.0 + r * (1.0 / 720.0 + r * (1.0 / 5040.0)))))));
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "|k| <= 44 for the clamped argument, as in `exp`"
+    )]
+    let k = k as i32;
+    poly * pow2(k)
+}
+
+#[test]
+fn exp_returns_the_bits_it_returned_through_f64_round() {
+    let mut probes = vec![0.0, -0.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY];
+    // Every range-reduction tie, `(k + 1/2) * ln 2`, and its neighbours, the
+    // arguments where a rounding rule can differ, past the clamp both ways.
+    for k in -50_i32..=50 {
+        let tie = (f64::from(k) + 0.5) * std::f64::consts::LN_2;
+        probes.extend([tie.next_down(), tie, tie.next_up()]);
+    }
+    // A dense sweep of the clamped range between them.
+    probes.extend((-40_000_i32..=40_000).map(|step| f64::from(step) * 0.001));
+    for x in probes {
+        assert_eq!(
+            exp(x).to_bits(),
+            exp_through_f64_round(x).to_bits(),
+            "exp({x:?}) moved a bit"
+        );
+    }
+}
+
 #[test]
 fn vendored_exp_keeps_bits_per_byte_within_one_percent_of_f64_exp() {
     // Named corpus (CLAUDE.md hard rule 4): the founding session's

@@ -10994,3 +10994,45 @@ record.
   packing saves; any other CPU model; the packed slot with a fixed-point
   update in place of `adapt`'s `f64` division, which also changes bits.
   `research/progress.jsonl` it353 and it354.
+- S2-A165 | ACCEPTED | Issue #1979, the `round` half of #1928's third
+  row: the default level's decode called `f64::round` through the GOT at
+  every probability quantization and every `exp` range reduction.
+  Hypothesis: `src/round.rs`'s `nearest`, a truncating cast and one exact
+  subtraction, returns `f64::round`'s integer bit for bit and compiles
+  inline on baseline x86-64, so the libm row falls and the gate cases'
+  decode cost falls with it. | Mechanism: `Decoder::decode_bit`'s
+  `quantize_probability` and `literal::exp` call `nearest`. For `|x| <
+  2^52` the truncation is exact, so `x - trunc(x)` is exact and its
+  comparison with `0.5` is `round`'s ties-away-from-zero rule; a NaN casts
+  to 0 and fails both comparisons, as `round(NaN) as i64` gives 0. `exp`'s
+  only other change is that `k` stays an integer, so `k as f64` replaces
+  the rounded float: the one bit that can differ is a zero's sign in
+  `r` at `x = -0.0`, which `1.0 + r * (...)` erases. Bit-identity:
+  `tests/golden.rs` unchanged and passing; `nearest` against `f64::round`
+  at every half integer to 2000 and its neighbours, at the `2^52` edge, and
+  over random bit patterns and ties at every magnitude; `exp` against its
+  `f64::round` form on the bits at every range-reduction tie, its
+  neighbours, the clamp, a dense sweep, `-0.0`, NaN and the infinities.
+  Both flip tests were mutated (`>=` to `>`, `<=` to `<`) and fail. |
+  Measured, main at `28c21d6`, release build, AMD EPYC 9V45 runner.
+  Call sites through the `round` GOT slot in the `baseline_gate` binary,
+  from `objdump` and `readelf -r`: 16 to 3, the three left being
+  `cm_path::Contexts::update` (`Slot::update`, the `-4` path) and the bench's
+  `hold_at_best` twice; the 20 `fma` sites unchanged. `decode_profile` on
+  Silesia `xml` at the `bench/corpus.toml` pin, 5,345,280 bytes, CPU 3, one
+  run each: libm row 4.4% to 1.5% of the samples (15 of 344 to 5 of 342),
+  total 0.34 s both. `baseline_gate -- speed`, four alternating pairs, main
+  then branch: 94.90/93.87, 94.36/94.75, 91.42/93.64, 90.70/91.76
+  calibration steps per byte, means 92.85 and 93.51; its fp kernel line
+  51.77/50.34, 51.76/51.93, 51.62/51.37, 51.17/50.31. | Verdict:
+  **accepted** (`kind: "patch"`, null deltas, bytes unchanged), as a call
+  removed and not as a speedup: the gate cases read no move past the pairs'
+  spread (4.5% on main alone), and 342 samples resolve no share under about
+  3%. | **Not measured:** any CPU but this one; Silesia past `xml`;
+  encode, which runs the same sites; whether the libm row's remaining 1.5%
+  is `fma` alone (the row names three functions); `Slot::update`'s `round`,
+  left because `-4` stays untouched (ADR-0080). The `fma` half stays a libm
+  call: `mul_add`'s single rounding is what `src/sse.rs` relies on, so
+  `a * b + c` is a format change under hard rule 5 and an inline FMA needs
+  the `#[target_feature]` dispatch ADR-0053 keeps closed.
+  `research/progress.jsonl` it355.
