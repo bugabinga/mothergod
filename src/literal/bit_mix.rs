@@ -8,8 +8,13 @@
 //!   alignment: position phase, high nibble, node ─── p ─┤ weights selected by
 //!                                         bias 1/4 ─────┘ depth and weight key;
 //!                                                         squash ─> p
-//!   p ─ APM by node ─ a ─> (p + 3a) / 4 ─> coder
+//!   dot ─ APM by node ─ a ─> (p + 3a) / 4 ─> coder
 //! ```
+//!
+//! The APM's bin position reads the mixer's weighted sum, `stretch(p)`
+//! before the squash and the clamp, so it does not wait on them: the
+//! walk's nodes are one serial chain, and a lookup after the squash sat on
+//! it (`research/JOURNAL.md` S2-A167).
 //!
 //! Each expert is an adaptive probability per bit-tree node of its key,
 //! lpaq1's `StateMap` rule, no hashing: every key is a byte or less, so the
@@ -173,12 +178,12 @@ fn fresh_apm_row() -> [f64; APM_BINS] {
     row
 }
 
-/// `p`'s lower APM bin and the upper bin's interpolation weight, in
-/// `[0, 1)`: the lower bin is at most `APM_BINS - 2`, so both read inside
-/// the row.
+/// The lower APM bin of `stretched` and the upper bin's interpolation
+/// weight, in `[0, 1)`: the lower bin is at most `APM_BINS - 2`, so both
+/// read inside the row.
 #[inline]
-fn apm_position(table: &[f32], p: f64) -> (usize, f64) {
-    let held = table_stretch(table, p).clamp(-APM_HELD, APM_HELD);
+fn apm_position(stretched: f64) -> (usize, f64) {
+    let held = stretched.clamp(-APM_HELD, APM_HELD);
     let scaled = (held + APM_RANGE) * APM_STEPS_PER_UNIT;
     #[allow(
         clippy::cast_possible_truncation,
@@ -264,7 +269,7 @@ impl BitMix {
             let p = clamp_probability(table_squash(&self.squash_table, dot));
 
             let row = &mut self.apm[node];
-            let (lower, fraction) = apm_position(&self.stretch_table, p);
+            let (lower, fraction) = apm_position(dot);
             let calibrated = row[lower] * (1.0 - fraction) + row[lower + 1] * fraction;
             // The APM carries three quarters of the coded probability,
             // lpaq1's blend. Plain operations, not `mul_add`, which is a

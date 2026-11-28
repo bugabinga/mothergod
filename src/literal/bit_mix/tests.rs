@@ -110,26 +110,34 @@ fn a_byte_repeated_under_one_context_gets_cheaper() {
 }
 
 #[test]
-fn apm_position_keeps_both_bins_inside_the_row_at_the_clamp_edges() {
-    let table = fresh_stretch_table();
-    for p in [MIN_PROBABILITY, 0.5, 1.0 - MIN_PROBABILITY] {
-        let (lower, fraction) = apm_position(&table, p);
-        assert!(lower + 1 < APM_BINS, "p {p} read past the row at {lower}");
-        assert!((0.0..1.0).contains(&fraction), "p {p} fraction {fraction}");
+fn apm_position_keeps_both_bins_inside_the_row_at_and_past_the_clamp_edges() {
+    for stretched in [
+        f64::NEG_INFINITY,
+        -1e300,
+        -APM_RANGE,
+        0.0,
+        APM_RANGE,
+        1e300,
+        f64::INFINITY,
+    ] {
+        let (lower, fraction) = apm_position(stretched);
+        assert!(
+            lower + 1 < APM_BINS,
+            "stretch {stretched} read past the row at {lower}"
+        );
+        assert!(
+            (0.0..1.0).contains(&fraction),
+            "stretch {stretched} fraction {fraction}"
+        );
     }
-    assert_eq!(
-        apm_position(&table, 0.5),
-        (16, 0.0),
-        "one half is the middle bin"
-    );
+    assert_eq!(apm_position(0.0), (16, 0.0), "zero is the middle bin");
 }
 
 #[test]
 fn a_fresh_apm_row_maps_a_probability_to_itself_within_interpolation_error() {
     let row = fresh_apm_row();
-    let table = fresh_stretch_table();
     for p in [0.01, 0.2, 0.5, 0.7, 0.99] {
-        let (lower, fraction) = apm_position(&table, p);
+        let (lower, fraction) = apm_position(stretch(p));
         let calibrated = row[lower] * (1.0 - fraction) + row[lower + 1] * fraction;
         assert!(
             (calibrated - p).abs() < 0.02,
